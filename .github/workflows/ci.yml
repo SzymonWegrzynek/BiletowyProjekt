@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Nowy push do tego samego PR anuluje poprzednie, niedokończone sprawdzenie.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint, format, test, build
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      # Wersja pnpm z pola "packageManager" w package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Instalacja zależności
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Formatowanie
+        run: pnpm exec prettier --check .
+
+      - name: Testy
+        run: pnpm test
+        env:
+          # URI wskazuje tylko klaster; bazę wybiera MONGODB_DB_TEST.
+          # Sekret potrzebny dopiero dla testów na prawdziwej bazie.
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_DB_TEST: teatr-test
+
+      - name: Build
+        run: pnpm build
