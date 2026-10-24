@@ -48,10 +48,12 @@ teatr-kasa/
 │   ├── db.ts                     # połączenie z MongoDB
 │   ├── schemas.ts                # schematy Zod + typy
 │   ├── errors.ts                 # kody i format błędów
-│   └── reservation.ts            # zasady ważności rezerwacji
+│   ├── reservation.ts            # zasady ważności rezerwacji
+│   └── stubs.ts                  # zaślepki danych (do usunięcia po podpięciu bazy)
 ├── scripts/
 │   └── setup-db.ts               # indeksy + dane przykładowe
 ├── tests/                        # testy API (Vitest)
+├── .github/workflows/ci.yml      # CI: lint, formatowanie, testy, build
 ├── .env.example
 └── pnpm-lock.yaml
 ```
@@ -94,15 +96,17 @@ Baza jest **wspólna, w chmurze (Atlas)** — nie trzeba niczego instalować lok
 
 ## Zmienne środowiskowe
 
-| Zmienna                   | Opis                                              |
-| ------------------------- | ------------------------------------------------- |
-| `MONGODB_URI`             | adres klastra Atlas (z hasłem)                    |
-| `MONGODB_DB`              | nazwa bazy, np. `teatr` (do testów: `teatr-test`) |
-| `RESERVATION_TTL_MINUTES` | czas ważności rezerwacji (15, w testach 2)        |
+| Zmienna                   | Opis                                           |
+| ------------------------- | ---------------------------------------------- |
+| `MONGODB_URI`             | adres klastra Atlas (z hasłem)                 |
+| `MONGODB_DB`              | wspólna baza aplikacji: `teatr`                |
+| `MONGODB_DB_TEST`         | baza dla `pnpm test`: `teatr-test` (domyślnie) |
+| `RESERVATION_TTL_MINUTES` | czas ważności rezerwacji w minutach (15)       |
 
 - Pliku `.env` **nie commitujemy**. Adres bazy przekazujemy sobie prywatnie.
 - Nowa zmienna = wpis w `.env.example`.
-- Testy odpalamy na osobnej bazie (`MONGODB_DB=teatr-test`), żeby nie czyścić danych reszcie zespołu.
+- `pnpm test` zawsze działa na bazie z `MONGODB_DB_TEST`, żeby nie czyścić danych reszcie zespołu. Jeśli wskazuje tę samą bazę co `MONGODB_DB`, testy w ogóle nie ruszą.
+- Wygaśnięcie testujemy, przestawiając `expiresAt` w bazie, a nie czekając na upływ czasu.
 - `pnpm db:setup` na wspólnej bazie uruchamia tylko **Szymon**.
 
 ## Baza danych
@@ -161,8 +165,23 @@ Pilnuje ich **baza**, a nie same `if`-y w kodzie:
 
 ### Gałęzie
 
-- `main` — zawsze działająca wersja, **zmiany tylko przez Pull Request**
+- `main` — zawsze działająca wersja, **zmiany tylko przez Pull Request**. Nie commitujemy na nim bezpośrednio, GitHub i tak odrzuci push.
 - jedna karta z Trello = jedna gałąź z aktualnego `main`
+- gałąź żyje krótko: od wzięcia karty do merge, najlepiej 1–3 dni. Duża karta → kilka mniejszych PR-ów.
+
+**Nazwa gałęzi:** `prefiks/krotki-opis`
+
+| Prefiks  | Kiedy                                            | Przykład                     |
+| -------- | ------------------------------------------------ | ---------------------------- |
+| `feat/`  | nowa funkcja lub ekran                           | `feat/plan-widowni`          |
+| `fix/`   | poprawka błędu                                   | `fix/licznik-po-odswiezeniu` |
+| `test/`  | same testy                                       | `test/kontrakt-api`          |
+| `docs/`  | tylko dokumentacja (`README.md`, `CLAUDE.md`)    | `docs/przeplyw-ekranow`      |
+| `chore/` | konfiguracja, paczki, CI, porządki — bez funkcji | `chore/setup`                |
+
+- małe litery, słowa oddzielone `-`, **bez polskich znaków** i spacji (`plan-widowni`, nie `Plan_Widowni` ani `plan-widowni-ąę`)
+- 2–4 słowa, które mówią, co robi gałąź; bez imion i dat
+- poprawka do już zmergowanej karty = **nowa gałąź** `fix/...`, nie wracamy do starej
 
 | Szymon                     | Olek                | Paweł                       |
 | -------------------------- | ------------------- | --------------------------- |
@@ -173,14 +192,15 @@ Pilnuje ich **baza**, a nie same `if`-y w kodzie:
 | `feat/podwojna-rezerwacja` |                     | `test/kontrakt-api`         |
 | `feat/api-zakup`           |                     |                             |
 
-Prefiksy: `feat/` nowa funkcja, `fix/` poprawka, `test/` testy, `docs/` dokumentacja, `chore/` konfiguracja.
-
 ### Commity
 
 ```
 feat: dodaj endpoint rezerwacji
 fix: blokuj przycisk zakupu w trakcie wysyłania
 ```
+
+- ten sam prefiks co gałąź, opis po polsku, w trybie rozkazującym („dodaj”, „popraw”, nie „dodałem”)
+- commituj często, małymi krokami — przy Squash and merge i tak powstanie jeden commit na `main`
 
 ### Krok po kroku
 
@@ -197,13 +217,68 @@ git push -u origin feat/plan-widowni
 
 ### Pull Request
 
-- w opisie link do karty Trello i krótko: co zmienione, jak sprawdzić
-- **1 review** od innej osoby z zespołu
-- `pnpm lint` i `pnpm test` muszą przechodzić
-- Vercel automatycznie tworzy podgląd PR — sprawdź, czy działa
-- merge przez **Squash and merge**, potem usuń gałąź
+**Kiedy otworzyć:**
+
+- gdy karta jest skończona → zwykły PR, karta w Trello na `Review`
+- gdy chcesz wcześnie pokazać kierunek → **Draft PR** (strzałka przy „Create pull request” → „Create draft pull request”). Draftu nie da się zmergować; po skończeniu klikasz **Ready for review**.
+
+**Tytuł i opis:**
+
+- tytuł jak commit: `feat: plan widowni`
+- w opisie: link do karty Trello, co zmienione, jak sprawdzić (np. „wejdź na `/spektakl/dziady`, kliknij F7 → 409”)
+- po prawej **Reviewers** — wybierz osobę, żeby dostała powiadomienie
+
+**Wymagania do merge** (pilnuje ich ruleset na `main`):
+
+- **1 approve** od innej osoby z zespołu — swojego PR nie zatwierdzisz
+- CI (`lint, format, test, build`) musi być zielone
 - zmiany w `lib/db.ts`, `lib/schemas.ts`, `scripts/` i kontrakcie API — review **Szymona**
 - nowa paczka = zmieniony `pnpm-lock.yaml` w tym samym PR
+- Vercel automatycznie tworzy podgląd PR — sprawdź, czy działa
+
+**Review:**
+
+- recenzent: **Files changed** → komentarze przy liniach → **Review changes** → `Approve` albo `Request changes`
+- autor poprawia **w tej samej gałęzi** (`git commit` + `git push`) — nowe commity same trafiają do PR, nowego PR nie otwieramy
+- po poprawkach: odpowiedz na komentarze, kliknij **Resolve conversation** i ponownie poproś o review (ikona 🔄 przy recenzencie)
+- review w ciągu doby — nie blokujemy innych
+
+**Konflikty / „This branch is out-of-date”:**
+
+```bash
+git switch feat/plan-widowni
+git pull origin main          # rozwiąż konflikty w edytorze, jeśli są
+pnpm install                  # jeśli zmienił się pnpm-lock.yaml
+git add . && git commit       # tylko gdy były konflikty
+git push
+```
+
+Bez konfliktów wystarczy przycisk **Update branch** w PR.
+
+**Merge:**
+
+- robi go **autor PR** po approve i zielonym CI
+- zawsze **Squash and merge** — na `main` ląduje jeden commit z tytułem PR
+- karta w Trello → `Done`
+
+**Kiedy zamknąć PR bez merge (Close pull request):** zmiana okazała się niepotrzebna, kierunek się zmienił albo PR zastępuje inny — wtedy w komentarzu napisz dlaczego i podlinkuj nowy PR.
+
+### Usuwanie gałęzi
+
+Gałąź usuwamy **zaraz po merge** — jest już w `main`, a stara gałąź tylko myli.
+
+- na GitHubie: przycisk **Delete branch** pod zmergowanym PR
+- lokalnie:
+
+```bash
+git switch main && git pull
+git branch -d feat/plan-widowni   # -d odmówi, jeśli coś nie jest zmergowane
+git fetch --prune                 # usuwa lokalne odnośniki do skasowanych gałęzi zdalnych
+```
+
+Po Squash and merge `git branch -d` może zgłosić, że gałąź „nie jest w pełni zmergowana” (bo na `main` jest nowy, spłaszczony commit). Jeśli PR na GitHubie ma status **Merged**, usuń ją przez `git branch -D`.
+
+Nie usuwamy `main` i gałęzi z otwartym PR.
 
 ## Hosting
 
