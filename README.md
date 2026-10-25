@@ -157,6 +157,8 @@ Pilnuje ich **baza**, a nie same `if`-y w kodzie:
 | Podwójny zakup                | ponowienie zwraca ten sam kod                                           |
 | Błędne dane                   | schematy Zod w każdym POST                                              |
 
+**Dlaczego unikalny indeks wystarczy na podwójną rezerwację:** nie sprawdzamy w kodzie, czy miejsce jest wolne. Od razu próbujemy zapisać rezerwację, a MongoDB przy indeksie unikalnym `{ eventId, seatId }` przepuści tylko jeden dokument dla danego miejsca, nawet gdy 20 requestów przyjdzie w tej samej milisekundzie. Pozostałe dostają błąd duplikatu `E11000`, który zamieniamy na `409 SEAT_TAKEN`. Transakcja jest potrzebna tylko po to, żeby usunąć wygasłą rezerwację tego miejsca i wstawić nową jako jedną niepodzielną operację.
+
 ## Praca z repozytorium
 
 ### Gałęzie
