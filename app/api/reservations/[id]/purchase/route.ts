@@ -1,6 +1,7 @@
 import { MongoServerError, ObjectId } from "mongodb";
 import { reservationsCollection } from "@/lib/db";
 import { apiError } from "@/lib/errors";
+import { reservationIdSchema } from "@/lib/schemas";
 import { generateTicketCode } from "@/lib/ticket";
 
 const DUPLICATE_KEY = 11000;
@@ -11,11 +12,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!ObjectId.isValid(id)) {
+  const parsed = reservationIdSchema.safeParse(id);
+  if (!parsed.success) {
     return apiError("NOT_FOUND", "Nie ma takiej rezerwacji");
   }
 
-  const _id = new ObjectId(id);
+  const _id = new ObjectId(parsed.data);
   const now = new Date();
   const reservations = reservationsCollection();
 
