@@ -1,10 +1,11 @@
-import { ObjectId } from "mongodb";
+import { MongoServerError, ObjectId } from "mongodb";
+import { eventsCollection, getClient, reservationsCollection } from "@/lib/db";
 import { apiError } from "@/lib/errors";
 import { reservationExpiresAt } from "@/lib/reservation";
-import { createReservationSchema } from "@/lib/schemas";
-import { STUB_EVENTS, STUB_TAKEN_SEATS } from "@/lib/stubs";
+import { createReservationSchema, type Reservation } from "@/lib/schemas";
 
-// TODO(karta B): transakcja + unikalny indeks, E11000 → SEAT_TAKEN.
+const DUPLICATE_KEY = 11000;
+
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const parsed = createReservationSchema.safeParse(body);
@@ -13,15 +14,46 @@ export async function POST(request: Request) {
   }
 
   const { eventId, seatId } = parsed.data;
-  if (!STUB_EVENTS.some((e) => e._id === eventId)) {
-    return apiError("NOT_FOUND", "Nie ma takiego spektaklu");
+  const event = await eventsCollection().findOne(
+    { _id: eventId },
+    { projection: { _id: 1 } },
+  );
+  if (!event) return apiError("NOT_FOUND", "Nie ma takiego spektaklu");
+
+  const now = new Date();
+  const reservation: Reservation = {
+    _id: new ObjectId(),
+    ...parsed.data,
+    status: "held",
+    expiresAt: reservationExpiresAt(now),
+    createdAt: now,
+  };
+
+  // Nie sprawdzamy "czy wolne" przed zapisem — konflikt rozstrzyga unikalny
+  // indeks { eventId, seatId }. Wygasłe "held" usuwamy w tej samej transakcji,
+  // żeby nie blokowało indeksu; kupione zostaje na zawsze.
+  const reservations = reservationsCollection();
+  try {
+    await getClient().withSession((session) =>
+      session.withTransaction(async () => {
+        await reservations.deleteOne(
+          { eventId, seatId, status: "held", expiresAt: { $lte: now } },
+          { session },
+        );
+        await reservations.insertOne(reservation, { session });
+      }),
+    );
+  } catch (error) {
+    if (error instanceof MongoServerError && error.code === DUPLICATE_KEY) {
+      return apiError("SEAT_TAKEN");
+    }
+    throw error;
   }
-  if (STUB_TAKEN_SEATS.includes(seatId)) return apiError("SEAT_TAKEN");
 
   return Response.json(
     {
-      reservationId: new ObjectId().toHexString(),
-      expiresAt: reservationExpiresAt(new Date()).toISOString(),
+      reservationId: reservation._id.toHexString(),
+      expiresAt: reservation.expiresAt.toISOString(),
     },
     { status: 201 },
   );
