@@ -57,71 +57,74 @@ async function cleanup() {
   await reservationsCollection().deleteMany({ eventId: { $in: EVENT_IDS } });
 }
 
-beforeAll(async () => {
-  await cleanup();
-  await eventsCollection().insertMany([EVENT, OTHER_EVENT]);
-  await reservationsCollection().insertMany([
-    reservation(EVENT._id, "A1", "held", 10 * 60_000), // ważna
-    reservation(EVENT._id, "A2", "held", -60_000), // wygasła
-    reservation(EVENT._id, "C5", "purchased", -60_000), // kupiona (expiresAt bez znaczenia)
-    reservation(OTHER_EVENT._id, "F7", "held", 10 * 60_000), // inny spektakl
-  ]);
-});
+// Bez MONGODB_URI (np. w CI bez sekretu) pomijamy cały plik razem z hookami.
+describe.skipIf(!process.env.MONGODB_URI)("events z bazy", () => {
+  beforeAll(async () => {
+    await cleanup();
+    await eventsCollection().insertMany([EVENT, OTHER_EVENT]);
+    await reservationsCollection().insertMany([
+      reservation(EVENT._id, "A1", "held", 10 * 60_000), // ważna
+      reservation(EVENT._id, "A2", "held", -60_000), // wygasła
+      reservation(EVENT._id, "C5", "purchased", -60_000), // kupiona (expiresAt bez znaczenia)
+      reservation(OTHER_EVENT._id, "F7", "held", 10 * 60_000), // inny spektakl
+    ]);
+  });
 
-afterAll(async () => {
-  await cleanup();
-  await getClient().close();
-});
+  afterAll(async () => {
+    await cleanup();
+    await getClient().close();
+  });
 
-describe("GET /api/events", () => {
-  it("zwraca spektakle z bazy w kształcie z kontraktu", async () => {
-    const res = await getEvents();
-    expect(res.status).toBe(200);
-    const events: Event[] = await res.json();
-    const found = events.find((e) => e._id === EVENT._id);
-    expect(found).toEqual(EVENT);
-    for (const e of events) {
-      expect(Object.keys(e).sort()).toEqual(
-        ["_id", "date", "stage", "time", "title"].sort(),
+  describe("GET /api/events", () => {
+    it("zwraca spektakle z bazy w kształcie z kontraktu", async () => {
+      const res = await getEvents();
+      expect(res.status).toBe(200);
+      const events: Event[] = await res.json();
+      const found = events.find((e) => e._id === EVENT._id);
+      expect(found).toEqual(EVENT);
+      for (const e of events) {
+        expect(Object.keys(e).sort()).toEqual(
+          ["_id", "date", "stage", "time", "title"].sort(),
+        );
+      }
+    });
+  });
+
+  describe("GET /api/events/:id", () => {
+    it("zwraca { event, takenSeats } z kupionymi i ważnymi rezerwacjami", async () => {
+      const res = await getEvent(new Request("http://test"), ctx(EVENT._id));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(Object.keys(body).sort()).toEqual(["event", "takenSeats"]);
+      expect(body.event).toEqual(EVENT);
+      expect([...body.takenSeats].sort()).toEqual(["A1", "C5"]);
+    });
+
+    it("wygasła rezerwacja nie blokuje miejsca", async () => {
+      const res = await getEvent(new Request("http://test"), ctx(EVENT._id));
+      expect((await res.json()).takenSeats).not.toContain("A2");
+    });
+
+    it("nie miesza miejsc z innych spektakli", async () => {
+      const res = await getEvent(
+        new Request("http://test"),
+        ctx(OTHER_EVENT._id),
       );
-    }
-  });
-});
+      expect((await res.json()).takenSeats).toEqual(["F7"]);
+    });
 
-describe("GET /api/events/:id", () => {
-  it("zwraca { event, takenSeats } z kupionymi i ważnymi rezerwacjami", async () => {
-    const res = await getEvent(new Request("http://test"), ctx(EVENT._id));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Object.keys(body).sort()).toEqual(["event", "takenSeats"]);
-    expect(body.event).toEqual(EVENT);
-    expect([...body.takenSeats].sort()).toEqual(["A1", "C5"]);
-  });
-
-  it("wygasła rezerwacja nie blokuje miejsca", async () => {
-    const res = await getEvent(new Request("http://test"), ctx(EVENT._id));
-    expect((await res.json()).takenSeats).not.toContain("A2");
-  });
-
-  it("nie miesza miejsc z innych spektakli", async () => {
-    const res = await getEvent(
-      new Request("http://test"),
-      ctx(OTHER_EVENT._id),
-    );
-    expect((await res.json()).takenSeats).toEqual(["F7"]);
-  });
-
-  it.each([
-    ["nieistniejący spektakl", "nie-ma"],
-    ["puste id", ""],
-    ["id w formacie ObjectId", "507f1f77bcf86cd799439011"],
-    ["dziwne znaki", "$where"],
-  ])("404 NOT_FOUND: %s", async (_name, id) => {
-    const res = await getEvent(new Request("http://test"), ctx(id));
-    expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({
-      error: expect.any(String),
-      code: "NOT_FOUND",
+    it.each([
+      ["nieistniejący spektakl", "nie-ma"],
+      ["puste id", ""],
+      ["id w formacie ObjectId", "507f1f77bcf86cd799439011"],
+      ["dziwne znaki", "$where"],
+    ])("404 NOT_FOUND: %s", async (_name, id) => {
+      const res = await getEvent(new Request("http://test"), ctx(id));
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({
+        error: expect.any(String),
+        code: "NOT_FOUND",
+      });
     });
   });
 });
