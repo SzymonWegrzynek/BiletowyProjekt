@@ -28,3 +28,14 @@ export function eventsCollection() {
 export function reservationsCollection() {
   return getDb().collection<Reservation>("reservations");
 }
+
+// Indeksy pilnują invariantów: jedno miejsce = jeden dokument, jeden kod = jeden bilet.
+// createIndex jest idempotentne. Wołają to `pnpm db:setup` i testy.
+export async function ensureIndexes(): Promise<void> {
+  const reservations = reservationsCollection();
+  await reservations.createIndex({ eventId: 1, seatId: 1 }, { unique: true });
+  await reservations.createIndex(
+    { code: 1 },
+    { unique: true, partialFilterExpression: { code: { $exists: true } } },
+  );
+}
