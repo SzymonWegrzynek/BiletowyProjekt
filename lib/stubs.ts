@@ -26,5 +26,3 @@ export const STUB_EVENTS: Event[] = [
 ];
 
 export const STUB_TAKEN_SEATS = ["A1", "A2", "C5", "F7"];
-
-export const STUB_TICKET_CODE = "TEA-7F3K9Q";

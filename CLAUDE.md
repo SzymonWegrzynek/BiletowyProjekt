@@ -123,6 +123,8 @@ reservations.createIndex(
 );
 ```
 
+Definicje są w `ensureIndexes()` w `lib/db.ts` — wołają je `pnpm db:setup` i testy. Nie twórz indeksów w innym miejscu.
+
 ### Połączenie
 
 Klient MongoDB tworzymy raz i trzymamy w `globalThis` (hot reload w dev nie może otwierać nowych połączeń). Zawsze importuj z `lib/db.ts`, nie twórz nowego `MongoClient` w route handlerach.

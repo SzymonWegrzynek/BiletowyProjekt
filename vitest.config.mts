@@ -20,6 +20,9 @@ export default defineConfig({
   },
   test: {
     include: ["tests/**/*.test.ts"],
+    // Testy na Atlasie: pierwsze połączenie i transakcje trwają kilka sekund.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     env: { MONGODB_DB: testDb },
   },
 });
