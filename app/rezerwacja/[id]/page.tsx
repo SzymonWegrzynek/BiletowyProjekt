@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { ReservationTimer } from "@/components/ReservationTimer";
 import { eventsCollection, reservationsCollection } from "@/lib/db";
 import { formatSeat } from "@/lib/format";
+import { reservationIdSchema } from "@/lib/schemas";
 
 export const metadata: Metadata = { title: "Rezerwacja" };
 
@@ -28,7 +29,7 @@ async function ReservationDetails({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  if (!/^[0-9a-f]{24}$/i.test(id)) notFound();
+  if (!reservationIdSchema.safeParse(id).success) notFound();
 
   // Do klienta trafiają tylko pola potrzebne na ekranie (bez imienia i e-maila).
   const reservation = await reservationsCollection().findOne(
