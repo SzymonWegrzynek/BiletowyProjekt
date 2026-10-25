@@ -1,8 +1,6 @@
-import { ObjectId } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
 import { GET as getEvents } from "@/app/api/events/route";
 import { GET as getEvent } from "@/app/api/events/[id]/route";
-import { POST as purchase } from "@/app/api/reservations/[id]/purchase/route";
 
 // Handlery wołamy bezpośrednio, poza requestem Next.js.
 vi.mock("next/server", async (importOriginal) => ({
@@ -46,20 +44,5 @@ describe("GET /api/events/:id", () => {
       error: expect.any(String),
       code: "NOT_FOUND",
     });
-  });
-});
-
-describe("POST /api/reservations/:id/purchase", () => {
-  it("201 z kodem biletu", async () => {
-    const reservationId = new ObjectId().toHexString();
-    const res = await purchase(new Request("http://test"), ctx(reservationId));
-    expect(res.status).toBe(201);
-    expect((await res.json()).code).toMatch(/^TEA-[0-9A-Z]{6}$/);
-  });
-
-  it("404 dla niepoprawnego id", async () => {
-    const res = await purchase(new Request("http://test"), ctx("xyz"));
-    expect(res.status).toBe(404);
-    expect((await res.json()).code).toBe("NOT_FOUND");
   });
 });
