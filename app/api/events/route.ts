@@ -1,9 +1,12 @@
 import { connection } from "next/server";
-import { STUB_EVENTS } from "@/lib/stubs";
+import { eventsCollection } from "@/lib/db";
 
-// TODO(karta A): czytać z kolekcji events.
 export async function GET() {
   // Bez tego build prerenderuje listę i zamraża ją do następnego deployu.
   await connection();
-  return Response.json(STUB_EVENTS);
+  const events = await eventsCollection()
+    .find({}, { projection: { _id: 1, title: 1, date: 1, time: 1, stage: 1 } })
+    .sort({ date: 1, time: 1 })
+    .toArray();
+  return Response.json(events);
 }

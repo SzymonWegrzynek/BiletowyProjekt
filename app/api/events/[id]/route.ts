@@ -1,14 +1,27 @@
+import { eventsCollection, reservationsCollection } from "@/lib/db";
 import { apiError } from "@/lib/errors";
-import { STUB_EVENTS, STUB_TAKEN_SEATS } from "@/lib/stubs";
+import { activeReservationFilter } from "@/lib/reservation";
 
-// TODO(karta A): event z bazy, takenSeats przez activeReservationFilter(now).
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const event = STUB_EVENTS.find((e) => e._id === id);
+  if (!id.trim()) return apiError("NOT_FOUND", "Nie ma takiego spektaklu");
+
+  const event = await eventsCollection().findOne(
+    { _id: id },
+    { projection: { _id: 1, title: 1, date: 1, time: 1, stage: 1 } },
+  );
   if (!event) return apiError("NOT_FOUND", "Nie ma takiego spektaklu");
 
-  return Response.json({ event, takenSeats: STUB_TAKEN_SEATS });
+  const now = new Date();
+  const taken = await reservationsCollection()
+    .find(
+      { eventId: id, ...activeReservationFilter(now) },
+      { projection: { _id: 0, seatId: 1 } },
+    )
+    .toArray();
+
+  return Response.json({ event, takenSeats: taken.map((r) => r.seatId) });
 }

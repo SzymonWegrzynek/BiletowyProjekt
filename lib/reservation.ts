@@ -1,3 +1,6 @@
+import type { Filter } from "mongodb";
+import type { Reservation } from "@/lib/schemas";
+
 // Jedyne miejsce, które zna domyślny czas ważności rezerwacji.
 export function getTtlMinutes(): number {
   const ttl = Number(process.env.RESERVATION_TTL_MINUTES ?? 15);
@@ -9,4 +12,11 @@ export function getTtlMinutes(): number {
 
 export function reservationExpiresAt(now: Date): Date {
   return new Date(now.getTime() + getTtlMinutes() * 60_000);
+}
+
+// Rezerwacje blokujące miejsce: kupione albo trzymane i jeszcze ważne.
+export function activeReservationFilter(now: Date): Filter<Reservation> {
+  return {
+    $or: [{ status: "purchased" }, { status: "held", expiresAt: { $gt: now } }],
+  };
 }
