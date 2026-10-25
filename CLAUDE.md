@@ -24,7 +24,7 @@ pnpm dev          # serwer deweloperski
 pnpm build        # build produkcyjny
 pnpm lint         # ESLint
 pnpm format       # Prettier
-pnpm test         # Vitest (używa MONGODB_DB=teatr-test)
+pnpm test         # Vitest (baza z MONGODB_DB_TEST, domyślnie teatr-test)
 pnpm db:setup     # indeksy + seed — NIE uruchamiaj na wspólnej bazie bez pytania
 ```
 
@@ -43,6 +43,7 @@ lib/db.ts                 # połączenie z MongoDB (singleton)
 lib/schemas.ts            # schematy Zod + typy (z.infer)
 lib/errors.ts             # kody błędów i helper apiError()
 lib/reservation.ts        # reguły ważności rezerwacji
+lib/stubs.ts              # zaślepki danych, do usunięcia po podpięciu bazy
 scripts/setup-db.ts       # indeksy + seed
 tests/                    # testy API
 ```
@@ -200,6 +201,39 @@ Każdy `POST` zaczyna się od `schema.safeParse(body)`. Schematy i typy są w `l
 - Nigdy nie pokazuj „Kupiono” bez kodu zwróconego przez serwer.
 - Komunikaty: 409 → „Ktoś był szybszy — wybierz inne miejsce”, 410 → „Rezerwacja wygasła, miejsce wróciło do puli”.
 - Tailwind, mobile-first. Bez dodatkowych bibliotek UI bez pytania.
+
+### Przepływ danych między ekranami
+
+```
+/  ──klik spektaklu──▶  /spektakl/[eventId]  ──POST rezerwacji──▶  /rezerwacja/[reservationId]  ──POST zakupu──▶  /bilet/[code]
+```
+
+| Ekran              | Dostaje (z URL) | Skąd bierze resztę                                                 | Przekazuje dalej                                |
+| ------------------ | --------------- | ------------------------------------------------------------------ | ----------------------------------------------- |
+| `/`                | —               | `GET /api/events`                                                  | `eventId` → `/spektakl/[eventId]`               |
+| `/spektakl/[id]`   | `eventId`       | `GET /api/events/:id` → `{ event, takenSeats }`                    | `reservationId` → `/rezerwacja/[reservationId]` |
+| `/rezerwacja/[id]` | `reservationId` | serwer czyta rezerwację z bazy: `expiresAt`, `seatId`, `event`     | `code` → `/bilet/[code]`                        |
+| `/bilet/[code]`    | `code`          | serwer czyta bilet z bazy: spektakl, data, godzina, scena, miejsce | —                                               |
+
+Zasady:
+
+- **W URL tylko identyfikatory** (`eventId`, `reservationId`, `code`). Nigdy imienia ani e-maila w URL i nigdy `expiresAt` w query stringu.
+- **Wybór miejsca nie zmienia adresu.** `seatId` żyje w stanie strony `/spektakl/[id]`, a formularz rezerwacji jest na tej samej stronie. Body `POST /api/reservations` to `{ eventId, seatId, customerName, email }`.
+- **Po `201` z rezerwacji** → `router.push("/rezerwacja/" + reservationId)`. `expiresAt` z odpowiedzi nie przenosimy, bo ekran rezerwacji odczyta go sam z bazy. Licznik przetrwa wtedy odświeżenie strony.
+- **`/rezerwacja/[id]` i `/bilet/[code]` to server components**, które czytają z bazy przez `lib/db.ts`. Kontrakt nie ma `GET` na pojedynczą rezerwację ani bilet, a nowych endpointów **nie dodajemy**. Do klienta trafiają tylko pola potrzebne na ekranie (bez e-maila). Brak rekordu → `notFound()`.
+- **Po `201`/`200` z zakupu** → `router.push("/bilet/" + code)`. Bilet pokazujemy wyłącznie dla `status: "purchased"`.
+
+Błędy po drodze:
+
+| Gdzie              | Odpowiedź         | Co robi UI                                                                    |
+| ------------------ | ----------------- | ----------------------------------------------------------------------------- |
+| `/spektakl/[id]`   | 404               | „Nie ma takiego spektaklu” + link do `/`                                      |
+| formularz          | 400               | komunikat przy polu, zostajemy w formularzu                                   |
+| formularz          | 409               | komunikat 409, odświeżenie `takenSeats`, wybór innego miejsca                 |
+| `/rezerwacja/[id]` | 410 / licznik = 0 | komunikat 410 + powrót do `/spektakl/[eventId]`; po zerze nie wysyłamy zakupu |
+| `/rezerwacja/[id]` | 404               | „Nie ma takiej rezerwacji” + link do `/`                                      |
+
+Do czasu podpięcia bazy front pracuje na zaślepkach z `lib/stubs.ts`: spektakle `dziady`, `wesele`, `kordian`; zajęte `A1`, `A2`, `C5`, `F7` (rezerwacja → 409); zakup zawsze zwraca `TEA-7F3K9Q`.
 
 ## Testy
 
