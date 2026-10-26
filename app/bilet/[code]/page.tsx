@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eventsCollection, reservationsCollection } from "@/lib/db";
+import { formatSeat } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -50,7 +51,7 @@ export default async function TicketPage({
           <div className="rounded-lg bg-white p-4 shadow-sm">
             <dt className="text-sm text-gray-500">Miejsce</dt>
             <dd className="mt-1 text-xl font-semibold text-gray-900">
-              {reservation.seatId}
+              {formatSeat(reservation.seatId)}
             </dd>
           </div>
           <div className="rounded-lg bg-white p-4 shadow-sm">

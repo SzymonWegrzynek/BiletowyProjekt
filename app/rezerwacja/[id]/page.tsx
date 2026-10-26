@@ -63,7 +63,10 @@ async function ReservationDetails({
         expiresAt={reservation.expiresAt.toISOString()}
         eventId={reservation.eventId}
       >
-        <PurchaseTicketButton reservationId={id} />
+        <PurchaseTicketButton
+          reservationId={id}
+          eventId={reservation.eventId}
+        />
       </ReservationTimer>
     </section>
   );
