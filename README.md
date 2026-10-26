@@ -94,6 +94,8 @@ Baza jest **wspólna, w chmurze (Atlas)** — nie trzeba niczego instalować lok
 | `pnpm db:setup`     | tworzy indeksy i wgrywa dane przykładowe |
 | `pnpm add <paczka>` | dodaje zależność                         |
 
+> ⚠️ `pnpm db:setup` usuwa wszystkie dokumenty z kolekcji `events` i `reservations` w bazie wskazanej przez `MONGODB_DB`, a następnie wgrywa dane przykładowe. Na wspólnej bazie `teatr` może go uruchamiać tylko osoba odpowiedzialna za setup (Szymon). Do własnych prób używaj `MONGODB_DB=teatr-test`.
+
 ## Zmienne środowiskowe
 
 | Zmienna                   | Opis                                           |

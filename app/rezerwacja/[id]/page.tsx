@@ -3,11 +3,13 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { PurchaseButton } from "@/components/PurchaseButton";
+import { PurchaseTicketButton } from "@/components/PurchaseTicketButton";
 import { ReservationTimer } from "@/components/ReservationTimer";
 import { eventsCollection, reservationsCollection } from "@/lib/db";
 import { formatSeat } from "@/lib/format";
 import { reservationIdSchema } from "@/lib/schemas";
 
+export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Rezerwacja" };
 
 export default function ReservationPage({
@@ -63,6 +65,7 @@ async function ReservationDetails({
         eventId={reservation.eventId}
       >
         <PurchaseButton reservationId={id} eventId={reservation.eventId} />
+        <PurchaseTicketButton reservationId={id} />
       </ReservationTimer>
     </section>
   );
