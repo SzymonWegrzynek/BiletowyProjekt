@@ -2,11 +2,13 @@ import { ObjectId } from "mongodb";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
+import { PurchaseTicketButton } from "@/components/PurchaseTicketButton";
 import { ReservationTimer } from "@/components/ReservationTimer";
 import { eventsCollection, reservationsCollection } from "@/lib/db";
 import { formatSeat } from "@/lib/format";
 import { reservationIdSchema } from "@/lib/schemas";
 
+export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Rezerwacja" };
 
 export default function ReservationPage({
@@ -61,7 +63,7 @@ async function ReservationDetails({
         expiresAt={reservation.expiresAt.toISOString()}
         eventId={reservation.eventId}
       >
-        {/* TODO(karta C, Olek): przycisk „Kupuję bilet” (POST /api/reservations/:id/purchase). */}
+        <PurchaseTicketButton reservationId={id} />
       </ReservationTimer>
     </section>
   );

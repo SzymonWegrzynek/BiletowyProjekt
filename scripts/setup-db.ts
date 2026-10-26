@@ -41,9 +41,11 @@ const PURCHASED_SEATS = [
 ] as const;
 
 async function setupDatabase() {
-  const databaseName = process.env.MONGODB_DB;
+  const databaseName = process.env.MONGODB_DB ?? process.env.MONGODB_DB_TEST;
   if (!process.env.MONGODB_URI || !databaseName) {
-    throw new Error("Ustaw MONGODB_URI oraz MONGODB_DB w pliku .env");
+    throw new Error(
+      "Ustaw MONGODB_URI oraz MONGODB_DB (lub MONGODB_DB_TEST) w pliku .env",
+    );
   }
 
   try {
