@@ -45,6 +45,29 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     if (error instanceof MongoServerError && error.code === DUPLICATE_KEY) {
+      // Miejsce już zajęte — ale jeśli to ten sam klient ponawia tę samą
+      // rezerwację (podwójny klik, retry po timeoucie), oddajemy mu ją zamiast
+      // 409. Zapis już rozstrzygnął indeks, to tylko odczyt zwycięzcy.
+      const same = await reservations.findOne(
+        {
+          eventId,
+          seatId,
+          customerName: parsed.data.customerName,
+          email: parsed.data.email,
+          status: "held",
+          expiresAt: { $gt: now },
+        },
+        { projection: { expiresAt: 1 } },
+      );
+      if (same) {
+        return Response.json(
+          {
+            reservationId: same._id.toHexString(),
+            expiresAt: same.expiresAt.toISOString(),
+          },
+          { status: 200 },
+        );
+      }
       return apiError("SEAT_TAKEN");
     }
     throw error;

@@ -154,7 +154,11 @@ describe.skipIf(!process.env.MONGODB_URI)("kontrakt API", () => {
 
   it("409 SEAT_TAKEN: rezerwacja zajętego miejsca", async () => {
     expect((await reserve("C3")).status).toBe(201);
-    await expectError(await reserve("C3"), 409, "SEAT_TAKEN");
+    await expectError(
+      await reserve("C3", { customerName: "Anna", email: "anna@example.com" }),
+      409,
+      "SEAT_TAKEN",
+    );
   });
 
   it("400 VALIDATION_ERROR: błędne dane", async () => {
@@ -219,6 +223,23 @@ describe.skipIf(!process.env.MONGODB_URI)("kontrakt API", () => {
     expect(await second.json()).toEqual({ code });
 
     expect(await reservationsCollection().countDocuments({ code })).toBe(1);
+  });
+
+  it("podwójna rezerwacja: ten sam request 2× → ta sama rezerwacja", async () => {
+    const first = await reserve("E8");
+    expect(first.status).toBe(201);
+    const reservation = await first.json();
+
+    const second = await reserve("E8");
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(reservation);
+
+    expect(
+      await reservationsCollection().countDocuments({
+        eventId: EVENT._id,
+        seatId: "E8",
+      }),
+    ).toBe(1);
   });
 
   it("20 równoczesnych rezerwacji jednego miejsca → dokładnie 1 sukces", async () => {

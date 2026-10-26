@@ -58,6 +58,15 @@ describe.skipIf(!process.env.MONGODB_URI)("POST /api/reservations", () => {
     };
   }
 
+  // Inny klient na to samo miejsce.
+  function otherCustomer(seatId: string, i = 0) {
+    return {
+      ...body(seatId),
+      customerName: `Klient ${i}`,
+      email: `klient${i}@example.com`,
+    };
+  }
+
   function existing(
     seatId: string,
     status: Reservation["status"],
@@ -114,11 +123,52 @@ describe.skipIf(!process.env.MONGODB_URI)("POST /api/reservations", () => {
     expect(saved!.expiresAt.toISOString()).toBe(json.expiresAt);
   });
 
-  it("409 SEAT_TAKEN: miejsce z ważną rezerwacją", async () => {
+  it("409 SEAT_TAKEN: miejsce z ważną rezerwacją innego klienta", async () => {
     await createReservation(postJson(body("A2")));
-    const res = await createReservation(postJson(body("A2")));
+    const res = await createReservation(postJson(otherCustomer("A2")));
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe("SEAT_TAKEN");
+  });
+
+  it("idempotentność: ten sam request 2× po kolei → ta sama rezerwacja", async () => {
+    const first = await createReservation(postJson(body("B1")));
+    expect(first.status).toBe(201);
+    const firstJson = await first.json();
+
+    const second = await createReservation(postJson(body("B1")));
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(firstJson);
+
+    expect(await reservations().countDocuments({ eventId, seatId: "B1" })).toBe(
+      1,
+    );
+  });
+
+  it("idempotentność: 20 identycznych requestów równolegle → jedna rezerwacja", async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 20 }, () => createReservation(postJson(body("B2")))),
+    );
+    const statuses = responses.map((r) => r.status);
+    expect(statuses.filter((s) => s === 201)).toHaveLength(1);
+    expect(statuses.filter((s) => s === 200)).toHaveLength(19);
+
+    const ids = new Set(
+      await Promise.all(
+        responses.map(async (r) => (await r.json()).reservationId),
+      ),
+    );
+    expect(ids.size).toBe(1);
+    expect(await reservations().countDocuments({ eventId, seatId: "B2" })).toBe(
+      1,
+    );
+  });
+
+  it("idempotentność nie dotyczy kupionego miejsca: ten sam klient → 409", async () => {
+    await reservations().insertOne(
+      existing("B3", "purchased", new Date(Date.now() + 60_000)),
+    );
+    const res = await createReservation(postJson(body("B3")));
+    expect(res.status).toBe(409);
   });
 
   it("409 SEAT_TAKEN: miejsce kupione, nawet z dawnym expiresAt", async () => {
@@ -151,8 +201,8 @@ describe.skipIf(!process.env.MONGODB_URI)("POST /api/reservations", () => {
 
   it("20 równoczesnych rezerwacji jednego miejsca = dokładnie 1 sukces", async () => {
     const responses = await Promise.all(
-      Array.from({ length: 20 }, () =>
-        createReservation(postJson(body("H10"))),
+      Array.from({ length: 20 }, (_, i) =>
+        createReservation(postJson(otherCustomer("H10", i))),
       ),
     );
     const statuses = responses.map((r) => r.status);
@@ -169,7 +219,9 @@ describe.skipIf(!process.env.MONGODB_URI)("POST /api/reservations", () => {
       existing("H9", "held", new Date(Date.now() - 60_000)),
     );
     const responses = await Promise.all(
-      Array.from({ length: 20 }, () => createReservation(postJson(body("H9")))),
+      Array.from({ length: 20 }, (_, i) =>
+        createReservation(postJson(otherCustomer("H9", i))),
+      ),
     );
     const statuses = responses.map((r) => r.status);
 

@@ -164,7 +164,8 @@ await session.withTransaction(async () => {
     { session },
   );
 });
-// błąd E11000 (duplicate key) → 409 SEAT_TAKEN
+// błąd E11000 (duplicate key) → ważna "held" z tym samym eventId, seatId,
+// customerName i email? → 200 z tą rezerwacją (idempotentność) | inaczej 409
 ```
 
 ### Zakup (warunkowy atomowy update)
@@ -239,7 +240,7 @@ Do czasu podpięcia bazy front pracuje na zaślepkach z `lib/stubs.ts`: spektakl
 
 - Vitest, testy w `tests/`, uruchamiane na bazie `teatr-test`.
 - Każda zmiana w API = test.
-- Obowiązkowe scenariusze: ścieżka główna, 409 przy zajętym miejscu, 400/404, 410 po wygaśnięciu, podwójny zakup = ten sam kod, 20 równoległych rezerwacji jednego miejsca = dokładnie 1 sukces.
+- Obowiązkowe scenariusze: ścieżka główna, 409 przy zajętym miejscu, 400/404, 410 po wygaśnięciu, podwójny zakup = ten sam kod, podwójna identyczna rezerwacja = ta sama rezerwacja, 20 równoległych rezerwacji jednego miejsca od różnych klientów = dokładnie 1 sukces.
 - Do testów wygaśnięcia ustaw krótki `RESERVATION_TTL_MINUTES` lub manipuluj `expiresAt` w bazie — nie czekaj w teście 2 minut.
 
 ## Git
