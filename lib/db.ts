@@ -1,5 +1,5 @@
 import { MongoClient, type Db } from "mongodb";
-import type { Event, Reservation } from "./schemas.ts";
+import type { Event, RateLimitWindow, Reservation } from "./schemas.ts";
 
 // Jeden klient na proces: hot reload w dev nie może otwierać nowych połączeń.
 const globalForMongo = globalThis as typeof globalThis & {
@@ -39,6 +39,10 @@ export function reservationsCollection() {
   return getDb().collection<Reservation>("reservations");
 }
 
+export function rateLimitsCollection() {
+  return getDb().collection<RateLimitWindow>("rateLimits");
+}
+
 // Indeksy pilnują invariantów: jedno miejsce = jeden dokument, jeden kod = jeden bilet.
 // createIndex jest idempotentne. Wołają to `pnpm db:setup` i testy.
 export async function ensureIndexes(): Promise<void> {
@@ -47,5 +51,10 @@ export async function ensureIndexes(): Promise<void> {
   await reservations.createIndex(
     { code: 1 },
     { unique: true, partialFilterExpression: { code: { $exists: true } } },
+  );
+  // Liczniki limitu sprząta TTL po końcu okna; limit działa i bez tego indeksu.
+  await rateLimitsCollection().createIndex(
+    { expiresAt: 1 },
+    { expireAfterSeconds: 0 },
   );
 }

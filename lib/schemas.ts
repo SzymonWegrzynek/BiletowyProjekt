@@ -68,3 +68,10 @@ export type Reservation = CreateReservationInput & {
   code?: string;
   createdAt: Date;
 };
+
+// Licznik limitu: jeden dokument na klucz (np. IP) i okno czasowe.
+export type RateLimitWindow = {
+  _id: string;
+  count: number;
+  expiresAt: Date;
+};

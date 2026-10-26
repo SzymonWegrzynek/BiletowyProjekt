@@ -74,6 +74,9 @@ Format: `{ "error": "komunikat po polsku", "code": "KOD" }`
 | 404    | `NOT_FOUND`           | brak spektaklu / rezerwacji |
 | 409    | `SEAT_TAKEN`          | miejsce zajęte              |
 | 410    | `RESERVATION_EXPIRED` | rezerwacja wygasła          |
+| 429    | `RATE_LIMITED`        | za dużo rezerwacji z 1 IP   |
+
+Przy 429 dodajemy nagłówek `Retry-After` (sekundy).
 
 Każdy błąd zwracaj przez `apiError()` z `lib/errors.ts`. Nigdy nie zwracaj 500 dla błędów, które da się przewidzieć.
 
@@ -184,6 +187,10 @@ if (!updated) {
 
 Ponowny zakup tej samej rezerwacji **zwraca ten sam kod**, nie tworzy drugiego biletu.
 
+### Limit rezerwacji (429)
+
+`takeReservationSlot(ip, now)` z `lib/rate-limit.ts`: atomowy `$inc` z `upsert` w kolekcji `rateLimits`, klucz = IP + okno 10 s, limit z `RESERVATION_RATE_LIMIT` (domyślnie 30). Wołany po walidacji Zod, przed pierwszym zapytaniem o spektakl. Licznik jest w bazie, nie w pamięci — instancje na Vercelu nie dzielą RAM. Indeks TTL na `rateLimits.expiresAt` jest w `ensureIndexes()`.
+
 ### Walidacja
 
 Każdy `POST` zaczyna się od `schema.safeParse(body)`. Schematy i typy są w `lib/schemas.ts`; typy wyprowadzamy przez `z.infer`, nie piszemy ich ręcznie drugi raz.
@@ -242,6 +249,7 @@ Do czasu podpięcia bazy front pracuje na zaślepkach z `lib/stubs.ts`: spektakl
 - Każda zmiana w API = test.
 - Obowiązkowe scenariusze: ścieżka główna, 409 przy zajętym miejscu, 400/404, 410 po wygaśnięciu, podwójny zakup = ten sam kod, podwójna identyczna rezerwacja = ta sama rezerwacja, 20 równoległych rezerwacji jednego miejsca od różnych klientów = dokładnie 1 sukces.
 - Do testów wygaśnięcia ustaw krótki `RESERVATION_TTL_MINUTES` lub manipuluj `expiresAt` w bazie — nie czekaj w teście 2 minut.
+- Limit: zalew rezerwacji z jednego IP = 429 z `Retry-After`, a inny IP rezerwuje normalnie. Testy wołają handlery bez IP, więc dzielą jeden licznik — `vitest.config.mts` podnosi `RESERVATION_RATE_LIMIT`. Test limitu ustawia niski limit przez `vi.stubEnv` i własne IP w `x-forwarded-for`.
 
 ## Git
 
@@ -257,4 +265,4 @@ Do czasu podpięcia bazy front pracuje na zaślepkach z `lib/stubs.ts`: spektakl
 - ❌ Liczyć ważności rezerwacji w przeglądarce
 - ❌ Wpisywać sekretów do kodu — tylko `.env`
 - ❌ Uruchamiać `pnpm db:setup` lub czyścić kolekcje na wspólnej bazie bez pytania
-- ❌ Dodawać funkcji spoza Etapu I (płatności, kolejki, rate limiting) bez prośby
+- ❌ Dodawać funkcji spoza Etapu I (płatności, kolejki) bez prośby

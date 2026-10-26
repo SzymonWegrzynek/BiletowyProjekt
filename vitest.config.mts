@@ -23,6 +23,8 @@ export default defineConfig({
     // Testy na Atlasie: pierwsze połączenie i transakcje trwają kilka sekund.
     testTimeout: 30_000,
     hookTimeout: 30_000,
-    env: { MONGODB_DB: testDb },
+    // Testy wołają handlery bez IP, więc wszystkie dzielą jeden licznik
+    // limitu — podnosimy go; sam limit sprawdza tests/rate-limit.test.ts.
+    env: { MONGODB_DB: testDb, RESERVATION_RATE_LIMIT: "100000" },
   },
 });
