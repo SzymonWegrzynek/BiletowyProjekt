@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { z } from "zod";
+import { Spinner } from "@/components/Spinner";
 import { formatSeat } from "@/lib/format";
 import { createReservationSchema } from "@/lib/schemas";
 
@@ -90,62 +91,64 @@ export function ReservationForm({
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      noValidate
-      className="flex flex-col gap-4 rounded-lg border border-gray-200 p-4"
-    >
-      <h2 className="text-lg font-semibold">{formatSeat(seatId)}</h2>
+    <form onSubmit={handleSubmit} noValidate className="card flex flex-col p-7">
+      <p className="label">Twój wybór</p>
+      <h2 className="title mt-2 text-3xl">{formatSeat(seatId)}</h2>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="customerName" className="text-sm font-medium">
-          Imię
-        </label>
-        <input
-          id="customerName"
-          name="customerName"
-          autoComplete="given-name"
-          value={customerName}
-          onChange={(e) => setCustomerName(e.target.value)}
-          disabled={submitting}
-          aria-invalid={Boolean(fieldErrors.customerName)}
-          aria-describedby={
-            fieldErrors.customerName ? "customerName-error" : undefined
-          }
-          className="rounded border border-gray-300 px-3 py-2 aria-invalid:border-red-600"
-        />
-        {fieldErrors.customerName && (
-          <p id="customerName-error" className="text-sm text-red-600">
-            {fieldErrors.customerName}
-          </p>
-        )}
-      </div>
+      <div className="mt-8 flex flex-col gap-5">
+        <div className="flex flex-col gap-2">
+          <label htmlFor="customerName" className="text-sm font-medium">
+            Imię
+          </label>
+          <input
+            id="customerName"
+            name="customerName"
+            autoComplete="given-name"
+            placeholder="np. Anna"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            disabled={submitting}
+            aria-invalid={Boolean(fieldErrors.customerName)}
+            aria-describedby={
+              fieldErrors.customerName ? "customerName-error" : undefined
+            }
+            className="field"
+          />
+          {fieldErrors.customerName && (
+            <p id="customerName-error" className="text-sm text-cinnabar">
+              {fieldErrors.customerName}
+            </p>
+          )}
+        </div>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="email" className="text-sm font-medium">
-          E-mail
-        </label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          disabled={submitting}
-          aria-invalid={Boolean(fieldErrors.email)}
-          aria-describedby={fieldErrors.email ? "email-error" : undefined}
-          className="rounded border border-gray-300 px-3 py-2 aria-invalid:border-red-600"
-        />
-        {fieldErrors.email && (
-          <p id="email-error" className="text-sm text-red-600">
-            {fieldErrors.email}
-          </p>
-        )}
+        <div className="flex flex-col gap-2">
+          <label htmlFor="email" className="text-sm font-medium">
+            E-mail
+          </label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            inputMode="email"
+            placeholder="anna@przyklad.pl"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={submitting}
+            aria-invalid={Boolean(fieldErrors.email)}
+            aria-describedby={fieldErrors.email ? "email-error" : undefined}
+            className="field"
+          />
+          {fieldErrors.email && (
+            <p id="email-error" className="text-sm text-cinnabar">
+              {fieldErrors.email}
+            </p>
+          )}
+        </div>
       </div>
 
       {formError && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="alert mt-6">
           {formError}
         </p>
       )}
@@ -153,10 +156,14 @@ export function ReservationForm({
       <button
         type="submit"
         disabled={submitting}
-        className="rounded bg-gray-900 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+        className="btn-primary mt-8 w-full"
       >
+        {submitting && <Spinner />}
         {submitting ? "Rezerwuję…" : "Rezerwuję"}
       </button>
+      <p className="mt-4 text-center text-xs text-muted">
+        Miejsce czeka na Ciebie przez ograniczony czas.
+      </p>
     </form>
   );
 }

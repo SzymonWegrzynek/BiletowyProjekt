@@ -1,1 +1,86 @@
 @import "tailwindcss";
+
+/* Jeden ciemny motyw: grafitowe tło, ciemniejsze karty, ochra jako akcent. */
+:root {
+  color-scheme: dark;
+  --paper: #1d1c1b;
+  --surface: #141312;
+  --ink: #ece6da;
+  --muted: #8f887c;
+  --line: #2c2927;
+  --gold: #c9a15b;
+  --gold-soft: #2f281c;
+  --cinnabar: #e07a5f;
+  --seat-taken: #3a3632;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-cinnabar: var(--cinnabar);
+  --color-seat-taken: var(--seat-taken);
+
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: var(--font-cormorant), "Iowan Old Style", Georgia, serif;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--gold-soft);
+}
+
+@layer components {
+  /* Mała etykieta wersalikami nad wartością albo tytułem. */
+  .label {
+    @apply text-[11px] font-medium tracking-[0.18em] text-gold/80 uppercase;
+  }
+
+  .title {
+    @apply font-serif font-semibold tracking-tight text-gold;
+  }
+
+  /* Równe cyfry, żeby licznik i godziny nie skakały. */
+  .numerals {
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+
+  .card {
+    @apply rounded-[28px] border border-line/60 bg-surface shadow-[0_24px_48px_-24px_rgb(0_0_0/0.6)];
+  }
+
+  .btn-primary {
+    @apply inline-flex h-12 items-center justify-center gap-2 rounded-full bg-gold px-6 text-[15px] font-semibold text-surface transition duration-200 hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100;
+  }
+
+  .btn-secondary {
+    @apply inline-flex h-11 items-center justify-center gap-2 rounded-full border border-line px-5 text-sm font-medium text-ink transition-colors duration-200 hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold;
+  }
+
+  .field {
+    @apply h-12 w-full rounded-2xl border border-line bg-paper px-4 text-[15px] text-ink transition duration-200 outline-none placeholder:text-muted/60 focus:border-gold focus:ring-4 focus:ring-gold/15 disabled:opacity-60 aria-invalid:border-cinnabar aria-invalid:focus:ring-cinnabar/15;
+  }
+
+  .alert {
+    @apply rounded-2xl border border-cinnabar/30 bg-cinnabar/10 px-4 py-3 text-sm text-cinnabar;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

@@ -1,17 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ReservationForm } from "@/components/ReservationForm";
+import { formatEventDate, formatSeat } from "@/lib/format";
+import type { Event } from "@/lib/schemas";
 
 const ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
 const SEATS = Array.from({ length: 10 }, (_, index) => index + 1);
+// Przejście między fotelami 5 i 6, jak w prawdziwej widowni.
+const AISLE_AFTER = 5;
 
 // Co tyle odświeżamy takenSeats, żeby wygasłe rezerwacje wracały na plan.
 const REFRESH_MS = 15_000;
 const SEAT_TAKEN_MESSAGE = "Ktoś był szybszy — wybierz inne miejsce";
 
 type Props = {
-  eventId: string;
+  event: Event;
   takenSeats: string[];
 };
 
@@ -26,12 +30,14 @@ function parseTakenSeats(body: unknown): string[] | null {
     : null;
 }
 
-export function SeatMap({ eventId, takenSeats: initialTakenSeats }: Props) {
+export function SeatMap({ event, takenSeats: initialTakenSeats }: Props) {
+  const eventId = event._id;
   const [takenSeats, setTakenSeats] = useState(initialTakenSeats);
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // Po 201 trwa nawigacja — nasze własne miejsce nie może wtedy „przepaść”.
   const [reserved, setReserved] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -65,10 +71,23 @@ export function SeatMap({ eventId, takenSeats: initialTakenSeats }: Props) {
     !reserved && selectedSeat !== null && takenSeats.includes(selectedSeat);
   const activeSeat = selectionLost ? null : selectedSeat;
   const message = notice ?? (selectionLost ? SEAT_TAKEN_MESSAGE : null);
+  const freeCount = ROWS.length * SEATS.length - takenSeats.length;
+  const date = formatEventDate(event.date);
 
   function selectSeat(seatId: string) {
     setSelectedSeat(seatId);
     setNotice(null);
+    // Na węższym ekranie formularz jest pod planem — przewijamy do niego.
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)")
+        .matches;
+      requestAnimationFrame(() =>
+        panelRef.current?.scrollIntoView({
+          behavior: smooth ? "smooth" : "auto",
+          block: "start",
+        }),
+      );
+    }
   }
 
   function handleSeatTaken() {
@@ -78,64 +97,170 @@ export function SeatMap({ eventId, takenSeats: initialTakenSeats }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="rounded-xl border border-gray-300 bg-gray-50 p-4">
-        <div className="mx-auto mb-4 flex w-full max-w-xl items-center justify-center rounded bg-gray-200 py-2 text-sm font-semibold uppercase tracking-[0.2em] text-gray-700">
-          Scena
-        </div>
-        <div className="space-y-2">
-          {ROWS.map((row) => (
-            <div key={row} className="grid grid-cols-10 gap-2">
-              {SEATS.map((seat) => {
-                const seatId = `${row}${seat}`;
-                const taken = takenSeats.includes(seatId);
-                const selected = activeSeat === seatId;
+    <div className="grid gap-5 lg:grid-cols-[13rem_minmax(0,1fr)_21rem] lg:items-start">
+      <aside className="card p-6 lg:p-7">
+        <h2 className="title text-xl">Informacje</h2>
+        <dl className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-4 lg:grid-cols-1">
+          <Fact
+            label="Data"
+            value={date ? `${date.day} ${date.month}` : event.date}
+            hint={date?.weekday}
+          />
+          <Fact label="Godzina" value={event.time} numeric />
+          <Fact label="Scena" value={event.stage} />
+          <Fact label="Wolne miejsca" value={String(freeCount)} numeric />
+        </dl>
+      </aside>
 
-                return (
-                  <button
-                    key={seatId}
-                    type="button"
-                    aria-label={`Miejsce ${seatId}`}
-                    aria-pressed={selected}
-                    disabled={taken}
-                    onClick={() => selectSeat(seatId)}
-                    className={[
-                      "flex h-10 items-center justify-center rounded-md border text-xs font-medium transition-colors",
-                      taken
-                        ? "cursor-not-allowed border-gray-300 bg-gray-300 text-gray-500"
-                        : selected
-                          ? "border-emerald-600 bg-emerald-100 text-emerald-900"
-                          : "border-gray-300 bg-white text-gray-800 hover:border-emerald-600 hover:text-emerald-800",
-                    ].join(" ")}
-                  >
-                    {seatId}
-                  </button>
-                );
-              })}
+      <section aria-label="Plan widowni" className="card px-4 py-8 sm:px-8">
+        <div className="mx-auto max-w-md">
+          <div className="h-2 rounded-full bg-linear-to-r from-gold/0 via-gold/70 to-gold/0" />
+          <p className="label mt-3 text-center">Scena</p>
+        </div>
+
+        <div className="mx-auto mt-10 flex max-w-lg flex-col gap-2 sm:gap-2.5">
+          {ROWS.map((row) => (
+            <div key={row} className="flex items-center gap-2 sm:gap-3">
+              <span className="w-4 shrink-0 text-center text-xs font-medium text-muted">
+                {row}
+              </span>
+              <div className="grid flex-1 grid-cols-[repeat(5,minmax(0,1fr))_0.5rem_repeat(5,minmax(0,1fr))] gap-1.5 sm:grid-cols-[repeat(5,minmax(0,1fr))_1.25rem_repeat(5,minmax(0,1fr))] sm:gap-2">
+                {SEATS.map((seat) => {
+                  const seatId = `${row}${seat}`;
+                  const taken = takenSeats.includes(seatId);
+                  return (
+                    <SeatButton
+                      key={seatId}
+                      number={seat}
+                      label={`${formatSeat(seatId)}${taken ? ", zajęte" : ""}`}
+                      taken={taken}
+                      selected={activeSeat === seatId}
+                      aisleBefore={seat === AISLE_AFTER + 1}
+                      onSelect={() => selectSeat(seatId)}
+                    />
+                  );
+                })}
+              </div>
+              <span className="w-4 shrink-0 text-center text-xs font-medium text-muted">
+                {row}
+              </span>
             </div>
           ))}
         </div>
-      </div>
 
-      {message && (
-        <p role="alert" className="text-sm text-red-600">
-          {message}
-        </p>
-      )}
+        <ul className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted">
+          <Legend className="border border-line bg-paper">Wolne</Legend>
+          <Legend className="bg-gold">Twój wybór</Legend>
+          <Legend className="bg-seat-taken">Zajęte</Legend>
+        </ul>
+      </section>
 
-      {activeSeat ? (
-        <ReservationForm
-          key={activeSeat}
-          eventId={eventId}
-          seatId={activeSeat}
-          onSeatTaken={handleSeatTaken}
-          onReserved={() => setReserved(true)}
-        />
-      ) : (
-        <p className="rounded border border-dashed border-gray-300 p-4 text-sm text-gray-600">
-          Wybierz wolne miejsce na widowni, aby zarezerwować bilet.
-        </p>
-      )}
+      <aside
+        ref={panelRef}
+        aria-live="polite"
+        className="flex scroll-mt-6 flex-col gap-4"
+      >
+        {message && (
+          <p role="alert" className="alert">
+            {message}
+          </p>
+        )}
+
+        {activeSeat ? (
+          <ReservationForm
+            key={activeSeat}
+            eventId={eventId}
+            seatId={activeSeat}
+            onSeatTaken={handleSeatTaken}
+            onReserved={() => setReserved(true)}
+          />
+        ) : (
+          <div className="card p-7">
+            <h2 className="title text-2xl">Rezerwacja</h2>
+            <p className="mt-3 text-sm leading-relaxed text-muted">
+              Wybierz wolny fotel na planie widowni. Potem podasz imię i e-mail,
+              a miejsce będzie na Ciebie czekać do zakupu biletu.
+            </p>
+          </div>
+        )}
+      </aside>
     </div>
+  );
+}
+
+function Fact({
+  label,
+  value,
+  hint,
+  numeric = false,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  numeric?: boolean;
+}) {
+  return (
+    <div>
+      <dt className="label text-muted">{label}</dt>
+      <dd className={`mt-1 text-ink ${numeric ? "numerals" : ""}`}>{value}</dd>
+      {hint && <dd className="text-sm text-muted">{hint}</dd>}
+    </div>
+  );
+}
+
+function Legend({
+  className,
+  children,
+}: {
+  className: string;
+  children: string;
+}) {
+  return (
+    <li className="flex items-center gap-2">
+      <span className={`size-3 rounded-[4px] ${className}`} />
+      {children}
+    </li>
+  );
+}
+
+type SeatButtonProps = {
+  number: number;
+  label: string;
+  taken: boolean;
+  selected: boolean;
+  aisleBefore: boolean;
+  onSelect: () => void;
+};
+
+function SeatButton({
+  number,
+  label,
+  taken,
+  selected,
+  aisleBefore,
+  onSelect,
+}: SeatButtonProps) {
+  return (
+    <>
+      {aisleBefore && <span aria-hidden="true" />}
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={selected}
+        disabled={taken}
+        onClick={onSelect}
+        className={[
+          "flex aspect-square items-center justify-center rounded-lg text-[10px] font-medium transition duration-200 numerals sm:text-[11px]",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold",
+          taken
+            ? "cursor-not-allowed bg-seat-taken text-transparent"
+            : selected
+              ? "bg-gold font-semibold text-surface"
+              : "border border-line bg-paper text-muted hover:border-gold hover:text-gold active:scale-95",
+        ].join(" ")}
+      >
+        {number}
+      </button>
+    </>
   );
 }

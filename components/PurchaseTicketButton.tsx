@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useExpireReservation } from "@/components/ReservationTimer";
+import { Spinner } from "@/components/Spinner";
 
 const EXPIRED_MESSAGE = "Rezerwacja wygasła, miejsce wróciło do puli";
 const GENERIC_MESSAGE = "Nie udało się kupić biletu. Spróbuj ponownie.";
@@ -17,6 +19,7 @@ export function PurchaseTicketButton({ reservationId, eventId }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
+  const expireTimer = useExpireReservation();
 
   async function handlePurchase() {
     if (loading) return;
@@ -39,8 +42,13 @@ export function PurchaseTicketButton({ reservationId, eventId }: Props) {
         return;
       }
 
-      if (response.status === 410) setExpired(true);
-      else setError(json?.error ?? GENERIC_MESSAGE);
+      if (response.status === 410) {
+        // W liczniku: przełącz cały licznik na „wygasła”; poza nim — własny komunikat.
+        if (expireTimer) expireTimer();
+        else setExpired(true);
+        return;
+      }
+      setError(json?.error ?? GENERIC_MESSAGE);
     } catch {
       setError(GENERIC_MESSAGE);
     }
@@ -49,11 +57,11 @@ export function PurchaseTicketButton({ reservationId, eventId }: Props) {
 
   if (expired) {
     return (
-      <div role="alert" className="flex flex-col gap-2">
-        <p className="text-lg font-medium text-red-600">{EXPIRED_MESSAGE}</p>
+      <div role="alert" className="flex flex-col items-center gap-6">
+        <p className="alert w-full text-center">{EXPIRED_MESSAGE}</p>
         <Link
           href={`/spektakl/${encodeURIComponent(eventId)}`}
-          className="underline"
+          className="btn-secondary"
         >
           Wróć do widowni
         </Link>
@@ -63,19 +71,20 @@ export function PurchaseTicketButton({ reservationId, eventId }: Props) {
 
   return (
     <>
+      {error && (
+        <p role="alert" className="alert">
+          {error}
+        </p>
+      )}
       <button
         type="button"
         onClick={handlePurchase}
         disabled={loading}
-        className="rounded bg-gray-900 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+        className="btn-primary w-full"
       >
+        {loading && <Spinner />}
         {loading ? "Kupuję bilet…" : "Kupuję bilet"}
       </button>
-      {error && (
-        <p role="alert" className="text-sm text-red-600">
-          {error}
-        </p>
-      )}
     </>
   );
 }
