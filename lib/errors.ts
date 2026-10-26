@@ -9,12 +9,23 @@ const ERRORS = {
     status: 410,
     message: "Rezerwacja wygasła, miejsce wróciło do puli",
   },
+  RATE_LIMITED: {
+    status: 429,
+    message: "Za dużo prób rezerwacji. Spróbuj ponownie za chwilę.",
+  },
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;
 
 // Format z kontraktu: { error: "komunikat po polsku", code: "KOD" }.
-export function apiError(code: ErrorCode, message?: string): Response {
+export function apiError(
+  code: ErrorCode,
+  message?: string,
+  headers?: HeadersInit,
+): Response {
   const { status, message: defaultMessage } = ERRORS[code];
-  return Response.json({ error: message ?? defaultMessage, code }, { status });
+  return Response.json(
+    { error: message ?? defaultMessage, code },
+    { status, headers },
+  );
 }
