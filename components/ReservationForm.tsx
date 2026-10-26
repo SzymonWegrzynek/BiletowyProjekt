@@ -17,6 +17,8 @@ type Props = {
   seatId: string;
   // Po 409: widownia odświeża takenSeats i pozwala wybrać inne miejsce.
   onSeatTaken?: () => void;
+  // Po 201/200, tuż przed przejściem na /rezerwacja/[id].
+  onReserved?: () => void;
 };
 
 function validate(data: unknown): FieldErrors {
@@ -29,7 +31,12 @@ function validate(data: unknown): FieldErrors {
   };
 }
 
-export function ReservationForm({ eventId, seatId, onSeatTaken }: Props) {
+export function ReservationForm({
+  eventId,
+  seatId,
+  onSeatTaken,
+  onReserved,
+}: Props) {
   const router = useRouter();
   const [customerName, setCustomerName] = useState("");
   const [email, setEmail] = useState("");
@@ -59,6 +66,7 @@ export function ReservationForm({ eventId, seatId, onSeatTaken }: Props) {
       // 201 = nowa rezerwacja, 200 = ponowiony request zwrócił tę samą.
       if (res.ok && typeof json?.reservationId === "string") {
         // Przycisk zostaje zablokowany do końca nawigacji.
+        onReserved?.();
         router.push(`/rezerwacja/${json.reservationId}`);
         return;
       }
