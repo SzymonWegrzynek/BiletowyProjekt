@@ -104,6 +104,7 @@ Baza jest **wspólna, w chmurze (Atlas)** — nie trzeba niczego instalować lok
 | `MONGODB_DB`              | wspólna baza aplikacji: `teatr`                |
 | `MONGODB_DB_TEST`         | baza dla `pnpm test`: `teatr-test` (domyślnie) |
 | `RESERVATION_TTL_MINUTES` | czas ważności rezerwacji w minutach (15)       |
+| `RESERVATION_RATE_LIMIT`  | rezerwacje z 1 IP na 10 s, potem 429 (30)      |
 
 - Pliku `.env` **nie commitujemy**. Adres bazy przekazujemy sobie prywatnie.
 - Nowa zmienna = wpis w `.env.example`.

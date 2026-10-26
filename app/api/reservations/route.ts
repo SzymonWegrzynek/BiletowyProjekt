@@ -1,6 +1,7 @@
 import { MongoServerError, ObjectId } from "mongodb";
 import { eventsCollection, getClient, reservationsCollection } from "@/lib/db";
 import { apiError } from "@/lib/errors";
+import { clientIp, takeReservationSlot } from "@/lib/rate-limit";
 import { reservationExpiresAt } from "@/lib/reservation";
 import { createReservationSchema, type Reservation } from "@/lib/schemas";
 
@@ -13,6 +14,16 @@ export async function POST(request: Request) {
     return apiError("VALIDATION_ERROR", parsed.error.issues[0]?.message);
   }
 
+  // Limit po walidacji (ta nie dotyka bazy), a przed jakimkolwiek zapytaniem
+  // o spektakl czy miejsce — nadmiar ruchu odpada najtaniej, jak się da.
+  const now = new Date();
+  const retryAfter = await takeReservationSlot(clientIp(request), now);
+  if (retryAfter !== null) {
+    return apiError("RATE_LIMITED", undefined, {
+      "Retry-After": String(retryAfter),
+    });
+  }
+
   const { eventId, seatId } = parsed.data;
   const event = await eventsCollection().findOne(
     { _id: eventId },
@@ -20,7 +31,6 @@ export async function POST(request: Request) {
   );
   if (!event) return apiError("NOT_FOUND", "Nie ma takiego spektaklu");
 
-  const now = new Date();
   const reservation: Reservation = {
     _id: new ObjectId(),
     ...parsed.data,
