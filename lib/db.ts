@@ -13,7 +13,8 @@ function requireEnv(name: string): string {
 }
 
 function resolveDatabaseName(): string {
-  const isVitest = process.env.VITEST === "true" || process.env.NODE_ENV === "test";
+  const isVitest =
+    process.env.VITEST === "true" || process.env.NODE_ENV === "test";
   if (isVitest && process.env.MONGODB_DB_TEST) {
     return process.env.MONGODB_DB_TEST;
   }

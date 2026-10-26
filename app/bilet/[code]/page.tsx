@@ -39,7 +39,9 @@ export default async function TicketPage({
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-800">
           Bilet kupiony
         </p>
-        <h1 className="mt-3 text-3xl font-semibold text-gray-950">{event.title}</h1>
+        <h1 className="mt-3 text-3xl font-semibold text-gray-950">
+          {event.title}
+        </h1>
         <p className="mt-2 text-gray-700">
           {event.date}, {event.time} · {event.stage}
         </p>

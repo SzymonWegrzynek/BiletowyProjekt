@@ -19,9 +19,12 @@ export function PurchaseTicketButton({ reservationId }: Props) {
     setError(null);
 
     try {
-      const response = await fetch(`/api/reservations/${reservationId}/purchase`, {
-        method: "POST",
-      });
+      const response = await fetch(
+        `/api/reservations/${reservationId}/purchase`,
+        {
+          method: "POST",
+        },
+      );
       const json = await response.json().catch(() => null);
 
       if (response.status === 201 || response.status === 200) {

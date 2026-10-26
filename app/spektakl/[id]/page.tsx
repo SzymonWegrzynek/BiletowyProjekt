@@ -38,7 +38,9 @@ export default async function EventDetailsPage({
           <p className="text-sm font-semibold uppercase tracking-wider text-emerald-800">
             Spektakl
           </p>
-          <h1 className="mt-2 text-3xl font-semibold text-gray-950">{event.title}</h1>
+          <h1 className="mt-2 text-3xl font-semibold text-gray-950">
+            {event.title}
+          </h1>
           <p className="mt-2 text-gray-600">
             {event.date}, {event.time} · {event.stage}
           </p>
