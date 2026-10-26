@@ -1,5 +1,5 @@
 import { MongoClient, type Db } from "mongodb";
-import type { Event, Reservation } from "@/lib/schemas";
+import type { Event, Reservation } from "./schemas.ts";
 
 // Jeden klient na proces: hot reload w dev nie może otwierać nowych połączeń.
 const globalForMongo = globalThis as typeof globalThis & {
@@ -12,13 +12,23 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function resolveDatabaseName(): string {
+  const isVitest =
+    process.env.VITEST === "true" || process.env.NODE_ENV === "test";
+  if (isVitest && process.env.MONGODB_DB_TEST) {
+    return process.env.MONGODB_DB_TEST;
+  }
+
+  return process.env.MONGODB_DB ?? requireEnv("MONGODB_DB");
+}
+
 export function getClient(): MongoClient {
   globalForMongo._mongoClient ??= new MongoClient(requireEnv("MONGODB_URI"));
   return globalForMongo._mongoClient;
 }
 
 export function getDb(): Db {
-  return getClient().db(requireEnv("MONGODB_DB"));
+  return getClient().db(resolveDatabaseName());
 }
 
 export function eventsCollection() {
