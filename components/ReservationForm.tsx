@@ -56,7 +56,8 @@ export function ReservationForm({ eventId, seatId, onSeatTaken }: Props) {
       });
       const json = await res.json().catch(() => null);
 
-      if (res.status === 201 && typeof json?.reservationId === "string") {
+      // 201 = nowa rezerwacja, 200 = ponowiony request zwrócił tę samą.
+      if (res.ok && typeof json?.reservationId === "string") {
         // Przycisk zostaje zablokowany do końca nawigacji.
         router.push(`/rezerwacja/${json.reservationId}`);
         return;
