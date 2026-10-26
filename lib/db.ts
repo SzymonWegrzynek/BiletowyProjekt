@@ -1,5 +1,5 @@
 import { MongoClient, type Db } from "mongodb";
-import type { Event, Reservation } from "@/lib/schemas";
+import type { Event, Reservation } from "./schemas.ts";
 
 // Jeden klient na proces: hot reload w dev nie może otwierać nowych połączeń.
 const globalForMongo = globalThis as typeof globalThis & {
