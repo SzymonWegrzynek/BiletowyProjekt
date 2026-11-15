@@ -72,6 +72,7 @@ describe.skipIf(!process.env.MONGODB_URI)(
         date: "2026-11-14",
         time: "19:00",
         stage: "Duża Scena",
+        price: 6000,
       });
     });
 

@@ -10,8 +10,17 @@ export const eventSchema = z.object({
   date: z.string(),
   time: z.string(),
   stage: z.string(),
+  // Kwota w groszach.
+  price: z.number().int().nonnegative(),
 });
 export type Event = z.infer<typeof eventSchema>;
+
+// Repertuar musi wyświetlać także rekordy sprzed migracji cen Etapu II.
+// Nowe dane (w tym seed) nadal wymagają poprawnego price w eventSchema.
+export const catalogEventSchema = eventSchema.extend({
+  price: eventSchema.shape.price.optional(),
+});
+export type CatalogEvent = z.infer<typeof catalogEventSchema>;
 
 // Rząd A–H + fotel 1–10, np. "F7".
 export const seatIdSchema = z
@@ -64,6 +73,8 @@ export const reservationIdSchema = z
 export type Reservation = CreateReservationInput & {
   _id: ObjectId;
   status: "held" | "purchased";
+  // Starsze rezerwacje Etapu I mogą nie mieć zapisanej kwoty.
+  amount?: number;
   expiresAt: Date;
   code?: string;
   createdAt: Date;

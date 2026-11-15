@@ -11,7 +11,7 @@ export async function GET(
 
   const event = await eventsCollection().findOne(
     { _id: id },
-    { projection: { _id: 1, title: 1, date: 1, time: 1, stage: 1 } },
+    { projection: { _id: 1, title: 1, date: 1, time: 1, stage: 1, price: 1 } },
   );
   if (!event) return apiError("NOT_FOUND", "Nie ma takiego spektaklu");
 
