@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { eventSchema, type Event } from "@/lib/schemas";
+import { catalogEventSchema, type CatalogEvent } from "@/lib/schemas";
+import { formatPrice } from "@/lib/format";
 
 type CatalogState = "loading" | "ready" | "error";
 
@@ -19,7 +20,7 @@ function formatDate(date: string): string {
 }
 
 export function EventCatalog() {
-  const [events, setEvents] = useState<Event[]>([]);
+  const [events, setEvents] = useState<CatalogEvent[]>([]);
   const [state, setState] = useState<CatalogState>("loading");
   const [attempt, setAttempt] = useState(0);
 
@@ -36,7 +37,7 @@ export function EventCatalog() {
         if (!response.ok) throw new Error("Event request failed");
 
         const body: unknown = await response.json();
-        const parsed = eventSchema.array().safeParse(body);
+        const parsed = catalogEventSchema.array().safeParse(body);
         if (!parsed.success) throw new Error("Invalid event response");
 
         setEvents(parsed.data);
@@ -83,30 +84,40 @@ export function EventCatalog() {
   }
 
   return (
-    <ul className="divide-y divide-gray-200 border-y border-gray-200">
-      {events.map((event) => (
+    <ul className="event-grid">
+      {events.map((event, index) => (
         <li key={event._id}>
           <Link
             href={`/spektakl/${encodeURIComponent(event._id)}`}
-            className="group grid gap-3 py-5 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-emerald-800 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-8 sm:py-6"
+            className="event-card"
+            data-tone={index % 3}
           >
-            <span className="min-w-0">
-              <span className="block text-xl font-semibold text-gray-950 group-hover:text-emerald-800 sm:text-2xl">
-                {event.title}
+            <div className="event-poster" aria-hidden="true">
+              <span className="poster-index">
+                SCENA / {String(index + 1).padStart(2, "0")}
               </span>
-              <span className="mt-1 block text-sm text-gray-600">
-                {event.stage}
-              </span>
-            </span>
-            <span className="flex items-baseline gap-3 text-sm text-gray-700 sm:justify-end">
-              <span>{formatDate(event.date)}</span>
-              <span className="font-mono font-semibold tabular-nums text-gray-950">
-                {event.time}
-              </span>
-              <span aria-hidden="true" className="ml-1 text-emerald-800">
-                →
-              </span>
-            </span>
+              <span className="poster-star">✳</span>
+              <span className="poster-title">{event.title}</span>
+            </div>
+            <div className="event-info">
+              <span className="event-stage">{event.stage}</span>
+              <h3 className="event-title">{event.title}</h3>
+              <div className="event-date">
+                <span>{formatDate(event.date)}</span>
+                <span aria-hidden="true">·</span>
+                <span>{event.time}</span>
+              </div>
+              <div className="event-bottom">
+                <span className="event-price">
+                  {event.price === undefined
+                    ? "Cena niedostępna"
+                    : formatPrice(event.price)}
+                </span>
+                <span className="event-action">
+                  Wybierz miejsce <span aria-hidden="true">↗</span>
+                </span>
+              </div>
+            </div>
           </Link>
         </li>
       ))}

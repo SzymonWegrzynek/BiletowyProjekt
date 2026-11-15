@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { SeatMap } from "@/components/SeatMap";
 import { eventsCollection, reservationsCollection } from "@/lib/db";
 import { activeReservationFilter } from "@/lib/reservation";
+import { formatPrice } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -17,7 +18,7 @@ export default async function EventDetailsPage({
 
   const event = await eventsCollection().findOne(
     { _id: id },
-    { projection: { _id: 1, title: 1, date: 1, time: 1, stage: 1 } },
+    { projection: { _id: 1, title: 1, date: 1, time: 1, stage: 1, price: 1 } },
   );
 
   if (!event) notFound();
@@ -44,6 +45,11 @@ export default async function EventDetailsPage({
           <p className="mt-2 text-gray-600">
             {event.date}, {event.time} · {event.stage}
           </p>
+          <p className="mt-2 font-semibold text-emerald-800">
+            {Number.isSafeInteger(event.price) && event.price >= 0
+              ? formatPrice(event.price)
+              : "Cena chwilowo niedostępna"}
+          </p>
         </div>
 
         <Link href="/" className="text-sm font-medium text-gray-700 underline">
@@ -51,7 +57,7 @@ export default async function EventDetailsPage({
         </Link>
       </div>
 
-      <SeatMap eventId={event._id} takenSeats={takenSeats} />
+      <SeatMap key={event._id} eventId={event._id} takenSeats={takenSeats} />
     </main>
   );
 }

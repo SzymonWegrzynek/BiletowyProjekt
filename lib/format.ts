@@ -10,3 +10,12 @@ export function formatCountdown(ms: number): string {
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
+export function formatPrice(amount: number): string {
+  if (!Number.isSafeInteger(amount) || amount < 0) {
+    throw new Error("Kwota musi być nieujemną liczbą całkowitą groszy");
+  }
+  return `${new Intl.NumberFormat("pl-PL", {
+    minimumFractionDigits: amount % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(amount / 100)} zł`;
+}

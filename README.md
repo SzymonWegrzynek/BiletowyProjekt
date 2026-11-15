@@ -287,6 +287,8 @@ Nie usuwamy `main` i gałęzi z otwartym PR.
 
 ## Hosting
 
+Lekcja E04: gdy webhook płatności się opóźnia, UI po 30 sekundach informuje o oczekiwaniu, sprawdza status co 10 sekund i pozwala sprawdzić go ręcznie; bilet pokazuje wyłącznie po odpowiedzi API `paid` z kodem, nigdy na podstawie powrotu ze Stripe.
+
 - **Vercel** — połączony z repo; `main` = wersja produkcyjna, każdy PR = podgląd
 - Zmienne środowiskowe ustawione w panelu Vercela
 - **Atlas → Network Access:** dozwolone `0.0.0.0/0` (Vercel nie ma stałego IP)
