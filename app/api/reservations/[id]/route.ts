@@ -1,0 +1,51 @@
+import { ObjectId } from "mongodb";
+import { reservationsCollection } from "@/lib/db";
+import { apiError } from "@/lib/errors";
+import { reservationIdSchema, type ReservationApiStatus } from "@/lib/schemas";
+
+// Front odpytuje co 2 s po powrocie ze Stripe'a — żadnego cache po drodze.
+const NO_STORE = { "Cache-Control": "no-store" };
+
+// GET /api/reservations/:id → { status, amount, expiresAt, code? }.
+// Bez imienia i e-maila: id rezerwacji jest w URL, więc odpowiedź nie może
+// ujawniać danych klienta.
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const parsed = reservationIdSchema.safeParse(id);
+  if (!parsed.success) {
+    return apiError("NOT_FOUND", "Nie ma takiej rezerwacji", NO_STORE);
+  }
+
+  const reservation = await reservationsCollection().findOne(
+    { _id: new ObjectId(parsed.data) },
+    { projection: { status: 1, amount: 1, expiresAt: 1, code: 1 } },
+  );
+  if (!reservation) {
+    return apiError("NOT_FOUND", "Nie ma takiej rezerwacji", NO_STORE);
+  }
+
+  // Ważność liczy serwer, nie przeglądarka.
+  const now = new Date();
+  const status: ReservationApiStatus =
+    reservation.status === "purchased"
+      ? "paid"
+      : reservation.expiresAt > now
+        ? "held"
+        : "expired";
+
+  return Response.json(
+    {
+      status,
+      amount: reservation.amount,
+      expiresAt: reservation.expiresAt.toISOString(),
+      // Kod biletu tylko przy opłaconej rezerwacji.
+      ...(status === "paid" && reservation.code
+        ? { code: reservation.code }
+        : {}),
+    },
+    { headers: NO_STORE },
+  );
+}
