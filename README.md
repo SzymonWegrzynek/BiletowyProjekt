@@ -301,7 +301,7 @@ Klient płaci na stronie **Stripe Checkout**. Rezerwacja staje się opłacona do
 
 Lekcja E02 (idempotencja): webhook zmienia status jednym warunkowym zapisem `status: "held"` → `"purchased"`, więc to samo zdarzenie dostarczone 2, 5 czy 10 razy — także równolegle — daje jeden bilet z tym samym kodem.
 
-Klient, który zapłacił, dostaje bilet albo zwrot: płatność po wygaśnięciu rezerwacji daje bilet, dopóki nikt nie przejął miejsca (inaczej zwrot).
+Klient, który zapłacił, dostaje bilet albo zwrot: płatność po wygaśnięciu rezerwacji daje bilet, dopóki nikt nie przejął miejsca (inaczej zwrot), a druga opłacona sesja za tę samą rezerwację kończy się zwrotem.
 
 ### Stripe lokalnie
 

@@ -119,10 +119,8 @@ async function handlePaidSession(
   // Ta sama sesja drugi raz (ponowienie Stripe'a) — bilet już jest.
   if (existing?.status === "purchased") {
     if (existing.paidSessionId === session.id) return;
-    // Opłacona inną sesją — obsługa w karcie „podwójna płatność”.
-    console.warn(
-      `Webhook Stripe: rezerwacja ${reservationId} opłacona inną sesją (${session.id})`,
-    );
+    // Opłacona inną sesją (dwie karty, podwójny klik) — druga płatność wraca.
+    await refund(session, reservationId, "duplicate_payment");
     return;
   }
 

@@ -234,6 +234,7 @@ Ponowny zakup tej samej rezerwacji **zwraca ten sam kod**, nie tworzy drugiego b
 - `/checkout`: odczyt rezerwacji → odmowa 404 / 409 `ALREADY_PAID` / 410 → `stripe.checkout.sessions.create` (`pln`, `unit_amount = amount`, `client_reference_id` i `metadata.reservationId` = id rezerwacji, `customer_email`, `expires_at` = minimum Stripe'a, 30 min) → warunkowy zapis `{ _id, status: "held" }` → `$set: { checkoutSessionId }` z `returnDocument: "before"`; poprzednia sesja jest wygaszana (`sessions.expire`).
 - Webhook (`app/api/webhooks/stripe/route.ts`): surowe body `request.text()` → `constructWebhookEvent()` (zły / brak podpisu → 400, brak `STRIPE_WEBHOOK_SECRET` → 503). Inne zdarzenia i `payment_status !== "paid"` → 200 bez zmian. Opłacona sesja → jeden warunkowy zapis `{ _id, status: "held" }` (bez `expiresAt`) → `purchased` + `code` + `paidAt` + `paidSessionId`. Gdy zapis nie trafił:
   - `purchased` z tym samym `paidSessionId` → 200 bez zmian (ponowienie, ten sam kod)
+  - `purchased` z inną sesją → zwrot (`duplicate_payment`)
   - brak dokumentu (miejsce przejęte po wygaśnięciu) albo sesja bez id rezerwacji → zwrot (`reservation_gone` / `unknown_reservation`)
 - Zwroty tylko przez `refundPayment()` z `lib/stripe.ts`: klucz idempotencji `refund-<sessionId>`, więc ponowiony webhook nie oddaje pieniędzy drugi raz. Błąd bazy albo zwrotu → 500, żeby Stripe ponowił.
 - Klient Stripe tylko z `getStripe()` w `lib/stripe.ts` (timeout 8 s, 1 ponowienie). Awaria Stripe'a albo brak `STRIPE_SECRET_KEY` / `APP_URL` → **503 `PAYMENT_UNAVAILABLE`** + `Retry-After`, szczegóły tylko w logach. Rezerwacja zostaje `held`.
@@ -302,7 +303,7 @@ Do czasu podpięcia bazy front pracuje na zaślepkach z `lib/stubs.ts`: spektakl
 - Każda zmiana w API = test.
 - Obowiązkowe scenariusze: ścieżka główna, 409 przy zajętym miejscu, 400/404, 410 po wygaśnięciu, podwójny zakup = ten sam kod, podwójna identyczna rezerwacja = ta sama rezerwacja, 20 równoległych rezerwacji jednego miejsca od różnych klientów = dokładnie 1 sukces.
 - Do testów wygaśnięcia ustaw krótki `RESERVATION_TTL_MINUTES` lub manipuluj `expiresAt` w bazie — nie czekaj w teście 2 minut.
-- Etap II: Stripe w testach **zawsze mockowany** (`vi.mock("@/lib/stripe")`), bez prawdziwych zapytań. Podpisy webhooka przez `stripe.webhooks.generateTestHeaderString`. Obowiązkowo: `price` / `amount`, `/checkout` (200 / 404 / 409 / 410 / 503), kwota sesji = `amount`, `GET` dla `held` / `paid` / `expired` / 404, webhook: zły podpis 400, ten sam webhook 10× = jeden kod, płatność po wygaśnięciu = bilet albo zwrot (`tests/webhook.test.ts`).
+- Etap II: Stripe w testach **zawsze mockowany** (`vi.mock("@/lib/stripe")`), bez prawdziwych zapytań. Podpisy webhooka przez `stripe.webhooks.generateTestHeaderString`. Obowiązkowo: `price` / `amount`, `/checkout` (200 / 404 / 409 / 410 / 503), kwota sesji = `amount`, `GET` dla `held` / `paid` / `expired` / 404, webhook: zły podpis 400, ten sam webhook 10× = jeden kod, płatność po wygaśnięciu = bilet albo zwrot, druga sesja = zwrot (`tests/webhook.test.ts`).
 - Limit: zalew rezerwacji z jednego IP = 429 z `Retry-After`, a inny IP rezerwuje normalnie. Testy wołają handlery bez IP, więc dzielą jeden licznik — `vitest.config.mts` podnosi `RESERVATION_RATE_LIMIT`. Test limitu ustawia niski limit przez `vi.stubEnv` i własne IP w `x-forwarded-for`.
 
 ## Git

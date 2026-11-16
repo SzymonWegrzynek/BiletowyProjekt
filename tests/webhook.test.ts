@@ -290,6 +290,78 @@ describe.skipIf(!process.env.MONGODB_URI)("webhook Stripe", () => {
     expect(other?.code).toBeUndefined();
   });
 
+  it("dwie sesje, dwa webhooki → jeden kod, zwrot drugiej płatności (też przy ponowieniu)", async () => {
+    const doc = await insert();
+    const id = doc._id.toHexString();
+    const first = sessionEvent(id, { sessionId: "cs_test_a" });
+    const second = sessionEvent(id, {
+      sessionId: "cs_test_b",
+      paymentIntent: "pi_b",
+    });
+
+    expect((await send(first)).status).toBe(200);
+    const code = (await find(doc))?.code;
+    expect(code).toBeTruthy();
+
+    expect((await send(second)).status).toBe(200);
+    expect(stripeMock.refund).toHaveBeenCalledTimes(1);
+    expect(stripeMock.refund).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payment_intent: "pi_b",
+        metadata: expect.objectContaining({ reason: "duplicate_payment" }),
+      }),
+      { idempotencyKey: "refund-cs_test_b" },
+    );
+
+    // Ponowienie drugiej sesji: ten sam klucz idempotencji → Stripe nie
+    // zrobi drugiego zwrotu. Ponowienie pierwszej: nic.
+    expect((await send(second)).status).toBe(200);
+    expect(stripeMock.refund).toHaveBeenLastCalledWith(expect.anything(), {
+      idempotencyKey: "refund-cs_test_b",
+    });
+    expect((await send(first)).status).toBe(200);
+    expect(stripeMock.refund).toHaveBeenCalledTimes(2);
+
+    const saved = await find(doc);
+    expect(saved?.code).toBe(code);
+    expect(saved?.paidSessionId).toBe("cs_test_a");
+  });
+
+  it("dwie sesje opłacone równocześnie → dokładnie jeden bilet i jeden zwrot", async () => {
+    const doc = await insert();
+    const id = doc._id.toHexString();
+    const events = ["cs_test_x", "cs_test_y"].map((sessionId) =>
+      sessionEvent(id, { sessionId }),
+    );
+
+    const responses = await Promise.all(events.map((event) => send(event)));
+    expect(responses.map((res) => res.status)).toEqual([200, 200]);
+
+    const saved = await find(doc);
+    expect(saved?.status).toBe("purchased");
+    expect(stripeMock.refund).toHaveBeenCalledTimes(1);
+    const loser =
+      saved?.paidSessionId === "cs_test_x" ? "cs_test_y" : "cs_test_x";
+    expect(stripeMock.refund).toHaveBeenCalledWith(expect.anything(), {
+      idempotencyKey: `refund-${loser}`,
+    });
+  });
+
+  it("zwrot już zrobiony wcześniej (charge_already_refunded) → 200", async () => {
+    const doc = await insert();
+    const id = doc._id.toHexString();
+    await send(sessionEvent(id, { sessionId: "cs_test_p" }));
+    stripeMock.refund.mockRejectedValueOnce(
+      new Stripe.errors.StripeInvalidRequestError({
+        message: "Charge has already been refunded.",
+        code: "charge_already_refunded",
+        type: "invalid_request_error",
+      }),
+    );
+    const res = await send(sessionEvent(id, { sessionId: "cs_test_q" }));
+    expect(res.status).toBe(200);
+  });
+
   it("zwrot się nie udał (Stripe nie odpowiada) → 500, żeby Stripe ponowił", async () => {
     stripeMock.refund.mockRejectedValueOnce(
       new Stripe.errors.StripeConnectionError({

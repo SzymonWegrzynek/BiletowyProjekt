@@ -92,6 +92,8 @@ export function isSignatureError(error: unknown): boolean {
 export type RefundReason =
   // Rezerwacja wygasła, a miejsce przejął ktoś inny (dokumentu już nie ma).
   | "reservation_gone"
+  // Rezerwacja jest już opłacona inną sesją Checkout.
+  | "duplicate_payment"
   // Sesja bez poprawnego id rezerwacji (nie z naszego /checkout).
   | "unknown_reservation";
 
