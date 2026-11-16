@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { formatEventDate } from "@/lib/format";
-import { eventSchema, type Event } from "@/lib/schemas";
+import { formatEventDate, formatPrice } from "@/lib/format";
+import { catalogEventSchema, type CatalogEvent } from "@/lib/schemas";
 
 type CatalogState = "loading" | "ready" | "error";
 
 export function EventCatalog() {
-  const [events, setEvents] = useState<Event[]>([]);
+  const [events, setEvents] = useState<CatalogEvent[]>([]);
   const [state, setState] = useState<CatalogState>("loading");
   const [attempt, setAttempt] = useState(0);
 
@@ -25,7 +25,7 @@ export function EventCatalog() {
         if (!response.ok) throw new Error("Event request failed");
 
         const body: unknown = await response.json();
-        const parsed = eventSchema.array().safeParse(body);
+        const parsed = catalogEventSchema.array().safeParse(body);
         if (!parsed.success) throw new Error("Invalid event response");
 
         setEvents(parsed.data);
@@ -112,18 +112,25 @@ export function EventCatalog() {
                 </div>
               </dl>
 
-              <span className="mt-auto flex items-center justify-between border-t border-line/60 pt-5 text-sm font-medium text-gold">
-                Wybierz miejsce
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  className="size-5 transition-transform duration-300 group-hover:translate-x-1"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path d="M5 12h14m-6-6 6 6-6 6" />
-                </svg>
+              <span className="mt-auto flex items-center justify-between gap-4 border-t border-line/60 pt-5 text-sm font-medium text-gold">
+                <span className="numerals text-base text-ink">
+                  {event.price === undefined
+                    ? "Cena niedostępna"
+                    : formatPrice(event.price)}
+                </span>
+                <span className="flex items-center gap-2">
+                  Wybierz miejsce
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    className="size-5 transition-transform duration-300 group-hover:translate-x-1"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  >
+                    <path d="M5 12h14m-6-6 6 6-6 6" />
+                  </svg>
+                </span>
               </span>
             </Link>
           </li>

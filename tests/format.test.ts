@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { formatCountdown, formatEventDate, formatSeat } from "@/lib/format";
+import {
+  formatCountdown,
+  formatEventDate,
+  formatPrice,
+  formatSeat,
+} from "@/lib/format";
+
+describe("formatPrice", () => {
+  it.each([
+    [6000, "60 zł"],
+    [4500, "45 zł"],
+    [4599, "45,99 zł"],
+    [5, "0,05 zł"],
+    [0, "0 zł"],
+    [6010, "60,10 zł"],
+  ])("%i groszy → %s", (amount, expected) => {
+    expect(formatPrice(amount)).toBe(expected);
+  });
+  it.each([-1, 1.5, NaN, Infinity])(
+    "odrzuca niepoprawną kwotę %s",
+    (amount) => {
+      expect(() => formatPrice(amount)).toThrow();
+    },
+  );
+});
 
 describe("formatSeat", () => {
   it.each([

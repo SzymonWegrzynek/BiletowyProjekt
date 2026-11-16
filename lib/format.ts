@@ -44,3 +44,14 @@ export function formatEventDate(date: string): EventDateParts | null {
     long: `${weekday}, ${day} ${monthName} ${year}`,
   };
 }
+
+// 6000 → "60 zł", 4550 → "45,50 zł". Kwoty są w groszach.
+export function formatPrice(amount: number): string {
+  if (!Number.isSafeInteger(amount) || amount < 0) {
+    throw new Error("Kwota musi być nieujemną liczbą całkowitą groszy");
+  }
+  return `${new Intl.NumberFormat("pl-PL", {
+    minimumFractionDigits: amount % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(amount / 100)} zł`;
+}

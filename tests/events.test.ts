@@ -22,6 +22,7 @@ const EVENT: Event = {
   date: "2026-11-14",
   time: "19:00",
   stage: "Duża Scena",
+  price: 6000,
 };
 const OTHER_EVENT: Event = {
   _id: "test-events-wesele",
@@ -29,6 +30,7 @@ const OTHER_EVENT: Event = {
   date: "2026-11-21",
   time: "19:00",
   stage: "Duża Scena",
+  price: 6000,
 };
 const EVENT_IDS = [EVENT._id, OTHER_EVENT._id];
 
@@ -84,7 +86,7 @@ describe.skipIf(!process.env.MONGODB_URI)("events z bazy", () => {
       expect(found).toEqual(EVENT);
       for (const e of events) {
         expect(Object.keys(e).sort()).toEqual(
-          ["_id", "date", "stage", "time", "title"].sort(),
+          ["_id", "date", "price", "stage", "time", "title"].sort(),
         );
       }
     });

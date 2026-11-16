@@ -40,6 +40,21 @@ body {
   background: var(--gold-soft);
 }
 
+button,
+a,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+a {
+  touch-action: manipulation;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
 @layer components {
   /* Mała etykieta wersalikami nad wartością albo tytułem. */
   .label {

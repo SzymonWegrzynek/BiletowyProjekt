@@ -17,7 +17,7 @@ export default async function EventDetailsPage({
 
   const event = await eventsCollection().findOne(
     { _id: id },
-    { projection: { _id: 1, title: 1, date: 1, time: 1, stage: 1 } },
+    { projection: { _id: 1, title: 1, date: 1, time: 1, stage: 1, price: 1 } },
   );
 
   if (!event) notFound();
@@ -42,7 +42,7 @@ export default async function EventDetailsPage({
         <h1 className="title mt-3 text-6xl sm:text-7xl">{event.title}</h1>
       </header>
 
-      <SeatMap event={event} takenSeats={takenSeats} />
+      <SeatMap key={event._id} event={event} takenSeats={takenSeats} />
     </main>
   );
 }

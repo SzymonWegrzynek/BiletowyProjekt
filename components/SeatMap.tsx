@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ReservationForm } from "@/components/ReservationForm";
-import { formatEventDate, formatSeat } from "@/lib/format";
+import { formatEventDate, formatPrice, formatSeat } from "@/lib/format";
 import type { Event } from "@/lib/schemas";
 
 const ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
@@ -100,7 +100,7 @@ export function SeatMap({ event, takenSeats: initialTakenSeats }: Props) {
     <div className="grid gap-5 lg:grid-cols-[13rem_minmax(0,1fr)_21rem] lg:items-start">
       <aside className="card p-6 lg:p-7">
         <h2 className="title text-xl">Informacje</h2>
-        <dl className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-4 lg:grid-cols-1">
+        <dl className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-1">
           <Fact
             label="Data"
             value={date ? `${date.day} ${date.month}` : event.date}
@@ -108,6 +108,15 @@ export function SeatMap({ event, takenSeats: initialTakenSeats }: Props) {
           />
           <Fact label="Godzina" value={event.time} numeric />
           <Fact label="Scena" value={event.stage} />
+          <Fact
+            label="Cena"
+            value={
+              Number.isSafeInteger(event.price) && event.price >= 0
+                ? formatPrice(event.price)
+                : "Chwilowo niedostępna"
+            }
+            numeric
+          />
           <Fact label="Wolne miejsca" value={String(freeCount)} numeric />
         </dl>
       </aside>

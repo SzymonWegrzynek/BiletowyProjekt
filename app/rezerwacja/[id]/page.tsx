@@ -3,10 +3,10 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { PurchaseTicketButton } from "@/components/PurchaseTicketButton";
+import { CheckoutButton } from "@/components/CheckoutButton";
 import { ReservationTimer } from "@/components/ReservationTimer";
 import { eventsCollection, reservationsCollection } from "@/lib/db";
-import { formatEventDate, formatSeat } from "@/lib/format";
+import { formatEventDate, formatPrice, formatSeat } from "@/lib/format";
 import { reservationIdSchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,7 @@ export const metadata: Metadata = { title: "Rezerwacja" };
 
 export default function ReservationPage({
   params,
+  searchParams,
 }: PageProps<"/rezerwacja/[id]">) {
   return (
     <main className="mx-auto w-full max-w-4xl px-4 sm:px-6">
@@ -25,7 +26,7 @@ export default function ReservationPage({
           </p>
         }
       >
-        <ReservationDetails params={params} />
+        <ReservationDetails params={params} searchParams={searchParams} />
       </Suspense>
     </main>
   );
@@ -33,16 +34,29 @@ export default function ReservationPage({
 
 async function ReservationDetails({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { id } = await params;
+  // Powrót z cancel_url Stripe'a: tylko komunikat, status i czas się nie zmieniają.
+  const cancelled = (await searchParams).anulowano === "1";
   if (!reservationIdSchema.safeParse(id).success) notFound();
 
   // Do klienta trafiają tylko pola potrzebne na ekranie (bez imienia i e-maila).
   const reservation = await reservationsCollection().findOne(
     { _id: new ObjectId(id) },
-    { projection: { eventId: 1, seatId: 1, status: 1, expiresAt: 1, code: 1 } },
+    {
+      projection: {
+        eventId: 1,
+        seatId: 1,
+        status: 1,
+        expiresAt: 1,
+        code: 1,
+        amount: 1,
+      },
+    },
   );
   if (!reservation) notFound();
   if (reservation.status === "purchased" && reservation.code) {
@@ -50,6 +64,14 @@ async function ReservationDetails({
   }
 
   const event = await eventsCollection().findOne({ _id: reservation.eventId });
+  // Kwota z rezerwacji (kopia ceny z chwili rezerwacji), nie aktualna cena
+  // spektaklu. Starsze rezerwacje Etapu I mogą jej nie mieć.
+  const amount =
+    typeof reservation.amount === "number" &&
+    Number.isSafeInteger(reservation.amount) &&
+    reservation.amount >= 0
+      ? reservation.amount
+      : null;
 
   const date = event ? formatEventDate(event.date) : null;
   const title = event?.title ?? "Spektakl";
@@ -75,10 +97,20 @@ async function ReservationDetails({
             expiresAt={reservation.expiresAt.toISOString()}
             eventId={reservation.eventId}
           >
-            <PurchaseTicketButton
-              reservationId={id}
-              eventId={reservation.eventId}
-            />
+            {amount !== null ? (
+              <CheckoutButton
+                amount={amount}
+                cancelled={cancelled}
+                reservationId={id}
+                eventId={reservation.eventId}
+                expiresAt={reservation.expiresAt.toISOString()}
+              />
+            ) : (
+              <p role="status" className="alert">
+                Nie udało się ustalić kwoty rezerwacji. Płatność jest chwilowo
+                niedostępna.
+              </p>
+            )}
           </ReservationTimer>
         </section>
 
@@ -91,6 +123,14 @@ async function ReservationDetails({
                 {formatSeat(reservation.seatId)}
               </dd>
             </div>
+            {amount !== null && (
+              <div>
+                <dt className="label text-muted">Do zapłaty</dt>
+                <dd className="mt-1 text-ink numerals">
+                  {formatPrice(amount)}
+                </dd>
+              </div>
+            )}
             {event && (
               <>
                 <div>
