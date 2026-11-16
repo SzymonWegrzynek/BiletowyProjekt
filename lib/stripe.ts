@@ -69,3 +69,21 @@ export async function expireCheckoutSessionQuietly(
     console.warn(`Nie udało się wygasić sesji Stripe ${sessionId}`, error);
   }
 }
+
+// Weryfikacja podpisu webhooka. Statyczne Stripe.webhooks nie potrzebuje
+// klucza API — wystarczy sekret webhooka (whsec_…).
+// Zły podpis → StripeSignatureVerificationError.
+export function constructWebhookEvent(
+  body: string,
+  signature: string,
+): Stripe.Event {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) {
+    throw new PaymentConfigError("Brak zmiennej STRIPE_WEBHOOK_SECRET");
+  }
+  return Stripe.webhooks.constructEvent(body, signature, secret);
+}
+
+export function isSignatureError(error: unknown): boolean {
+  return error instanceof Stripe.errors.StripeSignatureVerificationError;
+}
