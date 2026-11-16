@@ -73,12 +73,26 @@ export const reservationIdSchema = z
 export type Reservation = CreateReservationInput & {
   _id: ObjectId;
   status: "held" | "purchased";
-  // Starsze rezerwacje Etapu I mogą nie mieć zapisanej kwoty.
-  amount?: number;
   expiresAt: Date;
+  // Cena spektaklu skopiowana w chwili rezerwacji (grosze). Później się nie
+  // zmienia, nawet gdy zmieni się cena spektaklu — tyle płaci klient.
+  // Starsze rezerwacje Etapu I mogą jej nie mieć.
+  amount?: number;
+  // Ostatnia sesja Stripe Checkout utworzona dla tej rezerwacji.
+  checkoutSessionId?: string;
+  // Ustawia webhook po potwierdzeniu płatności, razem z `code`.
+  paidAt?: Date;
+  // Sesja Checkout, która opłaciła rezerwację (ustawia webhook). Odróżnia
+  // ponowiony webhook tej samej sesji od drugiej płatności (→ zwrot).
+  // checkoutSessionId nie wystarcza — nadpisuje go każde nowe „Zapłać”.
+  paidSessionId?: string;
   code?: string;
   createdAt: Date;
 };
+
+// Status rezerwacji w API (GET /api/reservations/:id). W bazie zostaje
+// held / purchased; "expired" to held po expiresAt, liczone przez serwer.
+export type ReservationApiStatus = "held" | "paid" | "expired";
 
 // Licznik limitu: jeden dokument na klucz (np. IP) i okno czasowe.
 export type RateLimitWindow = {

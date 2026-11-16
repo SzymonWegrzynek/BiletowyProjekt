@@ -27,15 +27,26 @@ export async function POST(request: Request) {
   const { eventId, seatId } = parsed.data;
   const event = await eventsCollection().findOne(
     { _id: eventId },
-    { projection: { _id: 1 } },
+    { projection: { _id: 1, price: 1 } },
   );
   if (!event) return apiError("NOT_FOUND", "Nie ma takiego spektaklu");
+  // Spektakle sprzed migracji cen mogą nie mieć price — rezerwacja działa,
+  // a „Zapłać” odpowie 503, dopóki seed nie doda ceny.
+  const amount = Number.isInteger(event.price) ? event.price : undefined;
+  if (amount === undefined) {
+    console.warn(
+      `Spektakl ${eventId} nie ma ceny (price) — rezerwacja bez amount`,
+    );
+  }
 
   const reservation: Reservation = {
     _id: new ObjectId(),
     ...parsed.data,
     status: "held",
     expiresAt: reservationExpiresAt(now),
+    // Cena kopiowana w chwili rezerwacji — późniejsza zmiana ceny spektaklu
+    // nie zmienia kwoty, którą zapłaci klient.
+    ...(amount === undefined ? {} : { amount }),
     createdAt: now,
   };
 
@@ -67,13 +78,14 @@ export async function POST(request: Request) {
           status: "held",
           expiresAt: { $gt: now },
         },
-        { projection: { expiresAt: 1 } },
+        { projection: { expiresAt: 1, amount: 1 } },
       );
       if (same) {
         return Response.json(
           {
             reservationId: same._id.toHexString(),
             expiresAt: same.expiresAt.toISOString(),
+            amount: same.amount,
           },
           { status: 200 },
         );
@@ -87,6 +99,7 @@ export async function POST(request: Request) {
     {
       reservationId: reservation._id.toHexString(),
       expiresAt: reservation.expiresAt.toISOString(),
+      amount: reservation.amount,
     },
     { status: 201 },
   );

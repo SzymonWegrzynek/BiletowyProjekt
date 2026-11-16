@@ -59,6 +59,7 @@ describe.skipIf(!process.env.MONGODB_URI)(
         status: "held",
         expiresAt: new Date(now + expiresInMs),
         createdAt: new Date(now),
+        amount: 6000,
       };
       await reservations().insertOne(doc);
       return doc._id.toHexString();
