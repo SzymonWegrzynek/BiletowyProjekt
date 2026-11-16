@@ -299,6 +299,8 @@ Klient płaci na stronie **Stripe Checkout**. Rezerwacja staje się opłacona do
 | `GET /api/reservations/:id`           | `{ status: "held" \| "paid" \| "expired", amount, expiresAt, code? }`            |
 | `POST /api/webhooks/stripe`           | potwierdza płatność: `held` → `purchased` + kod biletu                           |
 
+Lekcja E02 (idempotencja): webhook zmienia status jednym warunkowym zapisem `status: "held"` → `"purchased"`, więc to samo zdarzenie dostarczone 2, 5 czy 10 razy — także równolegle — daje jeden bilet z tym samym kodem.
+
 ### Stripe lokalnie
 
 1. W panelu Stripe przełącz się na **tryb testowy** i skopiuj `sk_test_…` do `STRIPE_SECRET_KEY` w `.env` (klucz dostajesz od Pawła prywatnie).

@@ -145,6 +145,7 @@ type Reservation = {
   amount?: number; // grosze, kopia event.price z chwili rezerwacji (brak w starych rezerwacjach Etapu I)
   checkoutSessionId?: string; // ostatnia sesja Stripe Checkout
   paidAt?: Date; // ustawia webhook
+  paidSessionId?: string; // sesja, która opłaciła rezerwację (ustawia webhook)
   code?: string; // ustawia webhook (albo stary /purchase)
   createdAt: Date;
 };
@@ -230,7 +231,9 @@ Ponowny zakup tej samej rezerwacji **zwraca ten sam kod**, nie tworzy drugiego b
 ### Płatność (Stripe Checkout)
 
 - `/checkout`: odczyt rezerwacji → odmowa 404 / 409 `ALREADY_PAID` / 410 → `stripe.checkout.sessions.create` (`pln`, `unit_amount = amount`, `client_reference_id` i `metadata.reservationId` = id rezerwacji, `customer_email`, `expires_at` = minimum Stripe'a, 30 min) → warunkowy zapis `{ _id, status: "held" }` → `$set: { checkoutSessionId }` z `returnDocument: "before"`; poprzednia sesja jest wygaszana (`sessions.expire`).
-- Webhook (`app/api/webhooks/stripe/route.ts`): surowe body `request.text()` → `constructWebhookEvent()` (zły / brak podpisu → 400, brak `STRIPE_WEBHOOK_SECRET` → 503). Inne zdarzenia i `payment_status !== "paid"` → 200 bez zmian. Opłacona sesja → jeden warunkowy zapis `{ _id, status: "held" }` → `purchased` + `code` + `paidAt`. Błąd bazy → 500, żeby Stripe ponowił.
+- Webhook (`app/api/webhooks/stripe/route.ts`): surowe body `request.text()` → `constructWebhookEvent()` (zły / brak podpisu → 400, brak `STRIPE_WEBHOOK_SECRET` → 503). Inne zdarzenia i `payment_status !== "paid"` → 200 bez zmian. Opłacona sesja → jeden warunkowy zapis `{ _id, status: "held" }` → `purchased` + `code` + `paidAt` + `paidSessionId`. Gdy zapis nie trafił:
+  - `purchased` z tym samym `paidSessionId` → 200 bez zmian (ponowienie, ten sam kod)
+- Błąd bazy → 500, żeby Stripe ponowił.
 - Klient Stripe tylko z `getStripe()` w `lib/stripe.ts` (timeout 8 s, 1 ponowienie). Awaria Stripe'a albo brak `STRIPE_SECRET_KEY` / `APP_URL` → **503 `PAYMENT_UNAVAILABLE`** + `Retry-After`, szczegóły tylko w logach. Rezerwacja zostaje `held`.
 - `APP_URL` z env, nigdy z nagłówka `Host`.
 - Klucze: tylko testowe (`sk_test_…`), tylko w `.env` / Vercelu, **bez** prefiksu `NEXT_PUBLIC_`.

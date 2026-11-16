@@ -89,6 +89,7 @@ async function handlePaidSession(
             status: "purchased",
             code: generateTicketCode(),
             paidAt,
+            paidSessionId: session.id,
           },
         },
         { returnDocument: "after", projection: { _id: 1 } },
@@ -102,7 +103,23 @@ async function handlePaidSession(
     }
   }
 
-  // Zapis nic nie zmienił — rezerwacja nie czeka już na płatność.
+  // Zapis nic nie zmienił — odczyt tylko po to, żeby wybrać gałąź.
+  // Status "purchased" nie wraca do "held", więc tu nie ma wyścigu.
+  const existing = await reservations.findOne(
+    { _id },
+    { projection: { status: 1, paidSessionId: 1 } },
+  );
+
+  // Ta sama sesja drugi raz (ponowienie Stripe'a) — bilet już jest.
+  if (existing?.status === "purchased") {
+    if (existing.paidSessionId === session.id) return;
+    // Opłacona inną sesją — obsługa w karcie „podwójna płatność”.
+    console.warn(
+      `Webhook Stripe: rezerwacja ${reservationId} opłacona inną sesją (${session.id})`,
+    );
+    return;
+  }
+
   console.warn(
     `Webhook Stripe: rezerwacja ${reservationId} nie czeka na płatność (sesja ${session.id})`,
   );

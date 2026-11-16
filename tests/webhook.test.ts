@@ -175,7 +175,7 @@ describe.skipIf(!process.env.MONGODB_URI)("webhook Stripe", () => {
     await getClient().close();
   });
 
-  it("opłacona sesja → purchased z kodem i paidAt; GET mówi paid", async () => {
+  it("opłacona sesja → purchased z kodem, paidAt i paidSessionId; GET mówi paid", async () => {
     const doc = await insert();
     const id = doc._id.toHexString();
     const event = sessionEvent(id, { sessionId: "cs_test_glowna" });
@@ -187,6 +187,7 @@ describe.skipIf(!process.env.MONGODB_URI)("webhook Stripe", () => {
     expect(saved?.status).toBe("purchased");
     expect(saved?.code).toMatch(/^TEA-[A-Z0-9]{6}$/);
     expect(saved?.paidAt).toBeInstanceOf(Date);
+    expect(saved?.paidSessionId).toBe("cs_test_glowna");
     expect(stripeMock.refund).not.toHaveBeenCalled();
 
     const status = await getReservation(new Request("http://test"), {
@@ -216,6 +217,25 @@ describe.skipIf(!process.env.MONGODB_URI)("webhook Stripe", () => {
     const saved = await find(doc);
     expect(saved?.status).toBe("held");
     expect(saved?.code).toBeUndefined();
+  });
+
+  it("ten sam webhook 10× równolegle → wszystkie 2xx, jeden kod, bez zwrotu", async () => {
+    const doc = await insert();
+    const event = sessionEvent(doc._id.toHexString());
+
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, () => send(event)),
+    );
+    expect(responses.map((res) => res.status)).toEqual(Array(10).fill(200));
+
+    const saved = await find(doc);
+    expect(saved?.status).toBe("purchased");
+    const code = saved?.code;
+
+    // Kolejne ponowienie po chwili też nie zmienia kodu.
+    expect((await send(event)).status).toBe(200);
+    expect((await find(doc))?.code).toBe(code);
+    expect(stripeMock.refund).not.toHaveBeenCalled();
   });
 
   it("błąd bazy → 500 (Stripe ponowi), rezerwacja bez zmian", async () => {
