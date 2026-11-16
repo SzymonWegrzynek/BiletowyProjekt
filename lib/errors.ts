@@ -9,9 +9,17 @@ const ERRORS = {
     status: 410,
     message: "Rezerwacja wygasła, miejsce wróciło do puli",
   },
+  ALREADY_PAID: {
+    status: 409,
+    message: "Ta rezerwacja jest już opłacona",
+  },
   RATE_LIMITED: {
     status: 429,
     message: "Za dużo prób rezerwacji. Spróbuj ponownie za chwilę.",
+  },
+  PAYMENT_UNAVAILABLE: {
+    status: 503,
+    message: "Płatności chwilowo niedostępne, spróbuj za chwilę",
   },
 } as const;
 

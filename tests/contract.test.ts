@@ -104,9 +104,11 @@ describe.skipIf(!process.env.MONGODB_URI)("kontrakt API", () => {
     expect(reserved.status).toBe(201);
     const reservation = await reserved.json();
     expect(Object.keys(reservation).sort()).toEqual([
+      "amount",
       "expiresAt",
       "reservationId",
     ]);
+    expect(reservation.amount).toBe(EVENT.price);
     expect(typeof reservation.reservationId).toBe("string");
     expect(new Date(reservation.expiresAt).toISOString()).toBe(
       reservation.expiresAt,
