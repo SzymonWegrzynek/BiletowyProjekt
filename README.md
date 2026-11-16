@@ -301,6 +301,8 @@ Klient płaci na stronie **Stripe Checkout**. Rezerwacja staje się opłacona do
 
 Lekcja E02 (idempotencja): webhook zmienia status jednym warunkowym zapisem `status: "held"` → `"purchased"`, więc to samo zdarzenie dostarczone 2, 5 czy 10 razy — także równolegle — daje jeden bilet z tym samym kodem.
 
+Klient, który zapłacił, dostaje bilet albo zwrot: płatność po wygaśnięciu rezerwacji daje bilet, dopóki nikt nie przejął miejsca (inaczej zwrot).
+
 ### Stripe lokalnie
 
 1. W panelu Stripe przełącz się na **tryb testowy** i skopiuj `sk_test_…` do `STRIPE_SECRET_KEY` w `.env` (klucz dostajesz od Pawła prywatnie).
@@ -311,7 +313,7 @@ Lekcja E02 (idempotencja): webhook zmienia status jednym warunkowym zapisem `sta
    ```
 
 3. CLI wypisze `whsec_…` — wklej go do `STRIPE_WEBHOOK_SECRET` i uruchom ponownie `pnpm dev`.
-4. Ręczne zdarzenie testowe: `stripe trigger checkout.session.completed`.
+4. Ręczne zdarzenie testowe: `stripe trigger checkout.session.completed`. Taka sesja nie ma id naszej rezerwacji, więc webhook odpowie 200 i zleci zwrot (widać go w panelu Stripe).
 
 Na Vercelu webhook jest ustawiony w panelu Stripe (test) na `https://<adres-vercela>/api/webhooks/stripe` ze zdarzeniem `checkout.session.completed`, a jego sekret jest w zmiennych Vercela.
 

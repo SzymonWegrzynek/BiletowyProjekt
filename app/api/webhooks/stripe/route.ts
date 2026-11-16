@@ -7,7 +7,10 @@ import {
   PAYMENT_RETRY_AFTER_SECONDS,
   PaymentConfigError,
   constructWebhookEvent,
+  getStripe,
   isSignatureError,
+  refundPayment,
+  type RefundReason,
 } from "@/lib/stripe";
 import { generateTicketCode } from "@/lib/ticket";
 
@@ -67,8 +70,9 @@ async function handlePaidSession(
   const parsed = reservationIdSchema.safeParse(
     session.client_reference_id ?? session.metadata?.reservationId,
   );
+  // Sesji bez naszej rezerwacji nie da się zamienić na bilet → zwrot.
   if (!parsed.success) {
-    console.error(`Webhook Stripe: sesja ${session.id} bez id rezerwacji`);
+    await refund(session, "", "unknown_reservation");
     return;
   }
 
@@ -77,7 +81,9 @@ async function handlePaidSession(
   const reservations = reservationsCollection();
   const paidAt = new Date();
 
-  // Jeden warunkowy zapis, jak zakup w Etapie I.
+  // Jeden warunkowy zapis, jak zakup w Etapie I. Filtr celowo BEZ expiresAt:
+  // dopóki dokument "held" istnieje, nikt inny nie ma tego miejsca (unikalny
+  // indeks { eventId, seatId }), więc spóźniona płatność daje bilet.
   // Drugi raz filtr już nie pasuje — ponowiony webhook niczego nie zmienia.
   // E11000 może tu dać tylko kolizja kodu → losujemy nowy.
   for (let attempt = 1; attempt <= MAX_CODE_ATTEMPTS; attempt++) {
@@ -120,7 +126,33 @@ async function handlePaidSession(
     return;
   }
 
-  console.warn(
-    `Webhook Stripe: rezerwacja ${reservationId} nie czeka na płatność (sesja ${session.id})`,
-  );
+  if (!existing) {
+    // Rezerwacja wygasła, a miejsce przejął ktoś inny (POST /api/reservations
+    // usuwa wygasłą "held") — biletu nie będzie, więc zwrot.
+    await refund(session, reservationId, "reservation_gone");
+    return;
+  }
+
+  // "held", a zapis nie trafił — nie powinno się zdarzyć. Rzucamy, żeby
+  // Stripe ponowił zamiast zgubić płatność.
+  throw new Error(`Rezerwacja ${reservationId} w nieoczekiwanym stanie`);
+}
+
+async function refund(
+  session: Stripe.Checkout.Session,
+  reservationId: string,
+  reason: RefundReason,
+): Promise<void> {
+  const paymentIntent = session.payment_intent;
+  const paymentIntentId =
+    typeof paymentIntent === "string" ? paymentIntent : paymentIntent?.id;
+  if (!paymentIntentId) {
+    throw new Error(`Sesja ${session.id} bez payment_intent — brak zwrotu`);
+  }
+  await refundPayment(getStripe(), {
+    sessionId: session.id,
+    paymentIntentId,
+    reservationId,
+    reason,
+  });
 }

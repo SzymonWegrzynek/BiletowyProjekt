@@ -11,6 +11,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { POST as createReservation } from "@/app/api/reservations/route";
 import { GET as getReservation } from "@/app/api/reservations/[id]/route";
 import { POST as webhook } from "@/app/api/webhooks/stripe/route";
 import {
@@ -236,6 +237,90 @@ describe.skipIf(!process.env.MONGODB_URI)("webhook Stripe", () => {
     expect((await send(event)).status).toBe(200);
     expect((await find(doc))?.code).toBe(code);
     expect(stripeMock.refund).not.toHaveBeenCalled();
+  });
+
+  it("płatność po expiresAt, dokument dalej jest → bilet, bez zwrotu", async () => {
+    const doc = await insert({ expiresInMs: -60_000 });
+    const res = await send(sessionEvent(doc._id.toHexString()));
+    expect(res.status).toBe(200);
+    expect((await find(doc))?.status).toBe("purchased");
+    expect(stripeMock.refund).not.toHaveBeenCalled();
+  });
+
+  it("płatność po wygaśnięciu, miejsce przejął ktoś inny → zwrot, nowy klient nietknięty", async () => {
+    const doc = await insert({ expiresInMs: -60_000 });
+
+    // Ktoś inny rezerwuje to samo miejsce — wygasła "held" zostaje usunięta.
+    const taken = await createReservation(
+      new Request("http://test/api/reservations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          eventId: EVENT._id,
+          seatId: doc.seatId,
+          customerName: "Ola",
+          email: "ola@example.com",
+        }),
+      }),
+    );
+    expect(taken.status).toBe(201);
+    const { reservationId: otherId } = await taken.json();
+    expect(await find(doc)).toBeNull();
+
+    const event = sessionEvent(doc._id.toHexString(), {
+      sessionId: "cs_test_spozniona",
+      paymentIntent: "pi_spozniona",
+    });
+    const res = await send(event);
+    expect(res.status).toBe(200);
+
+    expect(stripeMock.refund).toHaveBeenCalledTimes(1);
+    expect(stripeMock.refund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_intent: "pi_spozniona",
+        metadata: expect.objectContaining({ reason: "reservation_gone" }),
+      }),
+      { idempotencyKey: "refund-cs_test_spozniona" },
+    );
+
+    const other = await reservations().findOne({
+      _id: new ObjectId(otherId as string),
+    });
+    expect(other?.status).toBe("held");
+    expect(other?.code).toBeUndefined();
+  });
+
+  it("zwrot się nie udał (Stripe nie odpowiada) → 500, żeby Stripe ponowił", async () => {
+    stripeMock.refund.mockRejectedValueOnce(
+      new Stripe.errors.StripeConnectionError({
+        message: "timeout",
+        type: "api_error",
+      }),
+    );
+    const res = await send(sessionEvent(new ObjectId().toHexString()));
+    expect(res.status).toBe(500);
+  });
+
+  it("sesja bez id rezerwacji albo z nieistniejącą rezerwacją → zwrot", async () => {
+    const noId = sessionEvent("", { reservationId: null, sessionId: "cs_n" });
+    expect((await send(noId)).status).toBe(200);
+    expect(stripeMock.refund).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ reason: "unknown_reservation" }),
+      }),
+      { idempotencyKey: "refund-cs_n" },
+    );
+
+    const missing = sessionEvent(new ObjectId().toHexString(), {
+      sessionId: "cs_m",
+    });
+    expect((await send(missing)).status).toBe(200);
+    expect(stripeMock.refund).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ reason: "reservation_gone" }),
+      }),
+      { idempotencyKey: "refund-cs_m" },
+    );
   });
 
   it("błąd bazy → 500 (Stripe ponowi), rezerwacja bez zmian", async () => {

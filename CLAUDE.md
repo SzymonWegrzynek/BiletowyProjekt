@@ -111,12 +111,13 @@ Każdy błąd zwracaj przez `apiError()` z `lib/errors.ts`. Nigdy nie zwracaj 50
 ## Zasady systemu (invarianty)
 
 1. Jedno miejsce na spektaklu = najwyżej jedna aktywna rezerwacja albo bilet.
-2. Bilet powstaje tylko z ważnej rezerwacji (`status: "held"` i `expiresAt > now`).
+2. Bilet powstaje tylko z ważnej rezerwacji (`status: "held"` i `expiresAt > now`). Wyjątek — webhook: opłacona sesja daje bilet, dopóki dokument `held` **istnieje**, także po `expiresAt` (unikalny indeks gwarantuje, że nikt inny nie ma tego miejsca). Dokumentu już nie ma → zwrot.
 3. Jedna rezerwacja = jeden bilet (jeden kod).
 4. Wygasła rezerwacja nie blokuje miejsca.
 5. Czas ważności liczy serwer (`new Date()` po stronie API), nigdy klient.
 6. Rezerwacja jest opłacona **tylko** po webhooku Stripe'a z poprawnym podpisem. Powrót na `success_url` niczego nie dowodzi.
 7. Kwota płatności pochodzi wyłącznie z `reservation.amount` w bazie — nigdy z requestu ani z aktualnej ceny spektaklu.
+8. Klient, który zapłacił, dostaje **bilet albo zwrot** — nigdy nic. Webhook nie odpowiada 2xx, dopóki nie zapisze biletu albo nie zleci zwrotu.
 
 **Invariantów pilnuje baza, nie `if`-y.** Nigdy nie pisz wzorca „najpierw `findOne`, potem `insertOne`/`updateOne`” dla operacji, które mogą się ścigać.
 
@@ -231,9 +232,10 @@ Ponowny zakup tej samej rezerwacji **zwraca ten sam kod**, nie tworzy drugiego b
 ### Płatność (Stripe Checkout)
 
 - `/checkout`: odczyt rezerwacji → odmowa 404 / 409 `ALREADY_PAID` / 410 → `stripe.checkout.sessions.create` (`pln`, `unit_amount = amount`, `client_reference_id` i `metadata.reservationId` = id rezerwacji, `customer_email`, `expires_at` = minimum Stripe'a, 30 min) → warunkowy zapis `{ _id, status: "held" }` → `$set: { checkoutSessionId }` z `returnDocument: "before"`; poprzednia sesja jest wygaszana (`sessions.expire`).
-- Webhook (`app/api/webhooks/stripe/route.ts`): surowe body `request.text()` → `constructWebhookEvent()` (zły / brak podpisu → 400, brak `STRIPE_WEBHOOK_SECRET` → 503). Inne zdarzenia i `payment_status !== "paid"` → 200 bez zmian. Opłacona sesja → jeden warunkowy zapis `{ _id, status: "held" }` → `purchased` + `code` + `paidAt` + `paidSessionId`. Gdy zapis nie trafił:
+- Webhook (`app/api/webhooks/stripe/route.ts`): surowe body `request.text()` → `constructWebhookEvent()` (zły / brak podpisu → 400, brak `STRIPE_WEBHOOK_SECRET` → 503). Inne zdarzenia i `payment_status !== "paid"` → 200 bez zmian. Opłacona sesja → jeden warunkowy zapis `{ _id, status: "held" }` (bez `expiresAt`) → `purchased` + `code` + `paidAt` + `paidSessionId`. Gdy zapis nie trafił:
   - `purchased` z tym samym `paidSessionId` → 200 bez zmian (ponowienie, ten sam kod)
-- Błąd bazy → 500, żeby Stripe ponowił.
+  - brak dokumentu (miejsce przejęte po wygaśnięciu) albo sesja bez id rezerwacji → zwrot (`reservation_gone` / `unknown_reservation`)
+- Zwroty tylko przez `refundPayment()` z `lib/stripe.ts`: klucz idempotencji `refund-<sessionId>`, więc ponowiony webhook nie oddaje pieniędzy drugi raz. Błąd bazy albo zwrotu → 500, żeby Stripe ponowił.
 - Klient Stripe tylko z `getStripe()` w `lib/stripe.ts` (timeout 8 s, 1 ponowienie). Awaria Stripe'a albo brak `STRIPE_SECRET_KEY` / `APP_URL` → **503 `PAYMENT_UNAVAILABLE`** + `Retry-After`, szczegóły tylko w logach. Rezerwacja zostaje `held`.
 - `APP_URL` z env, nigdy z nagłówka `Host`.
 - Klucze: tylko testowe (`sk_test_…`), tylko w `.env` / Vercelu, **bez** prefiksu `NEXT_PUBLIC_`.
@@ -300,7 +302,7 @@ Do czasu podpięcia bazy front pracuje na zaślepkach z `lib/stubs.ts`: spektakl
 - Każda zmiana w API = test.
 - Obowiązkowe scenariusze: ścieżka główna, 409 przy zajętym miejscu, 400/404, 410 po wygaśnięciu, podwójny zakup = ten sam kod, podwójna identyczna rezerwacja = ta sama rezerwacja, 20 równoległych rezerwacji jednego miejsca od różnych klientów = dokładnie 1 sukces.
 - Do testów wygaśnięcia ustaw krótki `RESERVATION_TTL_MINUTES` lub manipuluj `expiresAt` w bazie — nie czekaj w teście 2 minut.
-- Etap II: Stripe w testach **zawsze mockowany** (`vi.mock("@/lib/stripe")`), bez prawdziwych zapytań. Podpisy webhooka przez `stripe.webhooks.generateTestHeaderString`. Obowiązkowo: `price` / `amount`, `/checkout` (200 / 404 / 409 / 410 / 503), kwota sesji = `amount`, `GET` dla `held` / `paid` / `expired` / 404, webhook: zły podpis 400, ten sam webhook 10× = jeden kod (`tests/webhook.test.ts`).
+- Etap II: Stripe w testach **zawsze mockowany** (`vi.mock("@/lib/stripe")`), bez prawdziwych zapytań. Podpisy webhooka przez `stripe.webhooks.generateTestHeaderString`. Obowiązkowo: `price` / `amount`, `/checkout` (200 / 404 / 409 / 410 / 503), kwota sesji = `amount`, `GET` dla `held` / `paid` / `expired` / 404, webhook: zły podpis 400, ten sam webhook 10× = jeden kod, płatność po wygaśnięciu = bilet albo zwrot (`tests/webhook.test.ts`).
 - Limit: zalew rezerwacji z jednego IP = 429 z `Retry-After`, a inny IP rezerwuje normalnie. Testy wołają handlery bez IP, więc dzielą jeden licznik — `vitest.config.mts` podnosi `RESERVATION_RATE_LIMIT`. Test limitu ustawia niski limit przez `vi.stubEnv` i własne IP w `x-forwarded-for`.
 
 ## Git
