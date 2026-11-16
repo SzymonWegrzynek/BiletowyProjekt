@@ -69,3 +69,72 @@ export async function expireCheckoutSessionQuietly(
     console.warn(`Nie udało się wygasić sesji Stripe ${sessionId}`, error);
   }
 }
+
+// Weryfikacja podpisu webhooka. Statyczne Stripe.webhooks nie potrzebuje
+// klucza API — wystarczy sekret webhooka (whsec_…).
+// Zły podpis → StripeSignatureVerificationError.
+export function constructWebhookEvent(
+  body: string,
+  signature: string,
+): Stripe.Event {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) {
+    throw new PaymentConfigError("Brak zmiennej STRIPE_WEBHOOK_SECRET");
+  }
+  return Stripe.webhooks.constructEvent(body, signature, secret);
+}
+
+export function isSignatureError(error: unknown): boolean {
+  return error instanceof Stripe.errors.StripeSignatureVerificationError;
+}
+
+// Dlaczego oddajemy pieniądze — trafia do metadata zwrotu i do logów.
+export type RefundReason =
+  // Rezerwacja wygasła, a miejsce przejął ktoś inny (dokumentu już nie ma).
+  | "reservation_gone"
+  // Rezerwacja jest już opłacona inną sesją Checkout.
+  | "duplicate_payment"
+  // Sesja bez poprawnego id rezerwacji (nie z naszego /checkout).
+  | "unknown_reservation";
+
+// Zwrot całej płatności sesji Checkout. Klient, który zapłacił, dostaje
+// bilet albo zwrot — nigdy nic. Klucz idempotencji = id sesji, więc ponowiony
+// webhook nie robi drugiego zwrotu (Stripe zwraca wynik pierwszego).
+// Klient Stripe przychodzi z zewnątrz (getStripe() w route), żeby testy
+// mogły go podmienić.
+export async function refundPayment(
+  stripe: Pick<Stripe, "refunds">,
+  {
+    sessionId,
+    paymentIntentId,
+    reservationId,
+    reason,
+  }: {
+    sessionId: string;
+    paymentIntentId: string;
+    reservationId: string;
+    reason: RefundReason;
+  },
+): Promise<void> {
+  try {
+    await stripe.refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        metadata: { reservationId, checkoutSessionId: sessionId, reason },
+      },
+      { idempotencyKey: `refund-${sessionId}` },
+    );
+  } catch (error) {
+    // Zwrot zrobiony już wcześniej (np. ręcznie w panelu) — cel osiągnięty.
+    if (
+      error instanceof Stripe.errors.StripeError &&
+      error.code === "charge_already_refunded"
+    ) {
+      return;
+    }
+    throw error;
+  }
+  console.warn(
+    `Zwrot płatności ${paymentIntentId} (sesja ${sessionId}, rezerwacja ${reservationId}): ${reason}`,
+  );
+}
