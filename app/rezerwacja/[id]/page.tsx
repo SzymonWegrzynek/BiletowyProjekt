@@ -2,10 +2,11 @@ import { ObjectId } from "mongodb";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
-import { ReservationTimer } from "@/components/ReservationTimer";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { CheckoutButton } from "@/components/CheckoutButton";
+import { ReservationTimer } from "@/components/ReservationTimer";
 import { eventsCollection, reservationsCollection } from "@/lib/db";
-import { formatSeat, formatPrice } from "@/lib/format";
+import { formatEventDate, formatPrice, formatSeat } from "@/lib/format";
 import { reservationIdSchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
@@ -16,10 +17,15 @@ export default function ReservationPage({
   searchParams,
 }: PageProps<"/rezerwacja/[id]">) {
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-8">
-      <h1 className="text-2xl font-semibold">Twoja rezerwacja</h1>
-      {/* cacheComponents: odczyt z bazy musi być za granicą Suspense. */}
-      <Suspense fallback={<p>Wczytuję rezerwację…</p>}>
+    <main className="mx-auto w-full max-w-4xl px-4 sm:px-6">
+      {/* Odczyt z bazy za granicą Suspense — szkielet strony jest od razu. */}
+      <Suspense
+        fallback={
+          <p role="status" className="py-24 text-center text-muted">
+            Wczytuję rezerwację…
+          </p>
+        }
+      >
         <ReservationDetails params={params} searchParams={searchParams} />
       </Suspense>
     </main>
@@ -34,6 +40,7 @@ async function ReservationDetails({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { id } = await params;
+  // Powrót z cancel_url Stripe'a: tylko komunikat, status i czas się nie zmieniają.
   const cancelled = (await searchParams).anulowano === "1";
   if (!reservationIdSchema.safeParse(id).success) notFound();
 
@@ -57,6 +64,8 @@ async function ReservationDetails({
   }
 
   const event = await eventsCollection().findOne({ _id: reservation.eventId });
+  // Kwota z rezerwacji (kopia ceny z chwili rezerwacji), nie aktualna cena
+  // spektaklu. Starsze rezerwacje Etapu I mogą jej nie mieć.
   const amount =
     typeof reservation.amount === "number" &&
     Number.isSafeInteger(reservation.amount) &&
@@ -64,44 +73,88 @@ async function ReservationDetails({
       ? reservation.amount
       : null;
 
+  const date = event ? formatEventDate(event.date) : null;
+  const title = event?.title ?? "Spektakl";
+
   return (
-    <section className="flex flex-col gap-4">
-      <div>
-        {event && (
-          <>
-            <p className="text-xl font-medium">{event.title}</p>
-            <p className="text-gray-600">
-              {event.date}, {event.time} · {event.stage}
-            </p>
-          </>
-        )}
-        <p className="mt-2 font-medium">{formatSeat(reservation.seatId)}</p>
-        {amount !== null && (
-          <p className="mt-2 font-semibold">
-            Do zapłaty: {formatPrice(amount)}
-          </p>
-        )}
+    <>
+      <div className="pt-4">
+        <Breadcrumb
+          href={`/spektakl/${encodeURIComponent(reservation.eventId)}`}
+          back="Widownia"
+          current="Rezerwacja"
+        />
       </div>
 
-      <ReservationTimer
-        expiresAt={reservation.expiresAt.toISOString()}
-        eventId={reservation.eventId}
-      >
-        {amount !== null ? (
-          <CheckoutButton
-            amount={amount}
-            cancelled={cancelled}
-            reservationId={id}
-            eventId={reservation.eventId}
+      <header className="pt-8 pb-8">
+        <p className="label">Twoja rezerwacja</p>
+        <h1 className="title mt-3 text-6xl sm:text-7xl">{title}</h1>
+      </header>
+
+      <div className="grid gap-5 md:grid-cols-[15rem_minmax(0,1fr)] md:items-start">
+        <section className="card px-6 py-10 sm:px-10 md:order-2">
+          <ReservationTimer
             expiresAt={reservation.expiresAt.toISOString()}
-          />
-        ) : (
-          <p role="status">
-            Nie udało się ustalić kwoty rezerwacji. Płatność jest chwilowo
-            niedostępna.
-          </p>
-        )}
-      </ReservationTimer>
-    </section>
+            eventId={reservation.eventId}
+          >
+            {amount !== null ? (
+              <CheckoutButton
+                amount={amount}
+                cancelled={cancelled}
+                reservationId={id}
+                eventId={reservation.eventId}
+                expiresAt={reservation.expiresAt.toISOString()}
+              />
+            ) : (
+              <p role="status" className="alert">
+                Nie udało się ustalić kwoty rezerwacji. Płatność jest chwilowo
+                niedostępna.
+              </p>
+            )}
+          </ReservationTimer>
+        </section>
+
+        <aside className="card p-7 md:order-1">
+          <h2 className="title text-xl">Szczegóły</h2>
+          <dl className="mt-5 grid grid-cols-2 gap-5 md:grid-cols-1">
+            <div>
+              <dt className="label text-muted">Miejsce</dt>
+              <dd className="mt-1 text-ink">
+                {formatSeat(reservation.seatId)}
+              </dd>
+            </div>
+            {amount !== null && (
+              <div>
+                <dt className="label text-muted">Do zapłaty</dt>
+                <dd className="mt-1 text-ink numerals">
+                  {formatPrice(amount)}
+                </dd>
+              </div>
+            )}
+            {event && (
+              <>
+                <div>
+                  <dt className="label text-muted">Data</dt>
+                  <dd className="mt-1 text-ink">
+                    {date ? `${date.day} ${date.month}` : event.date}
+                  </dd>
+                  {date && (
+                    <dd className="text-sm text-muted">{date.weekday}</dd>
+                  )}
+                </div>
+                <div>
+                  <dt className="label text-muted">Godzina</dt>
+                  <dd className="mt-1 text-ink numerals">{event.time}</dd>
+                </div>
+                <div>
+                  <dt className="label text-muted">Scena</dt>
+                  <dd className="mt-1 text-ink">{event.stage}</dd>
+                </div>
+              </>
+            )}
+          </dl>
+        </aside>
+      </div>
+    </>
   );
 }

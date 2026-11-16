@@ -209,6 +209,7 @@ Każdy `POST` zaczyna się od `schema.safeParse(body)`. Schematy i typy są w `l
 - Nigdy nie pokazuj „Kupiono” bez kodu zwróconego przez serwer.
 - Komunikaty: 409 → „Ktoś był szybszy — wybierz inne miejsce”, 410 → „Rezerwacja wygasła, miejsce wróciło do puli”.
 - Tailwind, mobile-first. Bez dodatkowych bibliotek UI bez pytania.
+- Wygląd: jeden ciemny motyw (grafit, ochra/złoto). Kolory to tokeny w `app/globals.css` (`bg-surface`, `text-gold`, `text-muted`…), a powtarzalne elementy to klasy `.card`, `.label`, `.title`, `.btn-primary`, `.btn-secondary`, `.field`, `.alert` — używaj ich zamiast surowych kolorów Tailwinda. Nagłówki: Cormorant Garamond (`.title`), reszta: Inter.
 
 ### Przepływ danych między ekranami
 

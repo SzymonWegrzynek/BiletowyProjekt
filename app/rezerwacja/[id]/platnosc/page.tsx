@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { PaymentStatus } from "@/components/PaymentStatus";
 import { reservationsCollection } from "@/lib/db";
 import { reservationIdSchema } from "@/lib/schemas";
@@ -21,12 +22,18 @@ export default async function PaymentPage({
     { projection: { _id: 0, eventId: 1 } },
   );
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-8">
-      <PaymentStatus
-        key={id}
-        reservationId={id}
-        eventId={reservation?.eventId ?? null}
-      />
+    <main className="mx-auto w-full max-w-4xl px-4 sm:px-6">
+      <div className="pt-4">
+        {/* Bez linku do rezerwacji — stamtąd łatwo zapłacić drugi raz. */}
+        <Breadcrumb href="/" back="Repertuar" current="Płatność" />
+      </div>
+      <section className="card mt-8 px-6 py-12 sm:px-10">
+        <PaymentStatus
+          key={id}
+          reservationId={id}
+          eventId={reservation?.eventId ?? null}
+        />
+      </section>
     </main>
   );
 }

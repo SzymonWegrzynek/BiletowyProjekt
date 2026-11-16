@@ -1,155 +1,275 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ReservationForm } from "@/components/ReservationForm";
+import { formatEventDate, formatPrice, formatSeat } from "@/lib/format";
+import type { Event } from "@/lib/schemas";
 
 const ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
 const SEATS = Array.from({ length: 10 }, (_, index) => index + 1);
+// Przejście między fotelami 5 i 6, jak w prawdziwej widowni.
+const AISLE_AFTER = 5;
+
+// Co tyle odświeżamy takenSeats, żeby wygasłe rezerwacje wracały na plan.
+const REFRESH_MS = 15_000;
+const SEAT_TAKEN_MESSAGE = "Ktoś był szybszy — wybierz inne miejsce";
 
 type Props = {
-  eventId: string;
+  event: Event;
   takenSeats: string[];
 };
 
-export function SeatMap({ eventId, takenSeats: initialTakenSeats }: Props) {
-  const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
+function parseTakenSeats(body: unknown): string[] | null {
+  if (typeof body !== "object" || body === null || !("takenSeats" in body)) {
+    return null;
+  }
+  const { takenSeats } = body;
+  if (!Array.isArray(takenSeats)) return null;
+  return takenSeats.every((seat) => typeof seat === "string")
+    ? takenSeats
+    : null;
+}
+
+export function SeatMap({ event, takenSeats: initialTakenSeats }: Props) {
+  const eventId = event._id;
   const [takenSeats, setTakenSeats] = useState(initialTakenSeats);
-  const [refreshVersion, setRefreshVersion] = useState(0);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [seatMessage, setSeatMessage] = useState<string | null>(null);
+  const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // Po 201 trwa nawigacja — nasze własne miejsce nie może wtedy „przepaść”.
+  const [reserved, setReserved] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `/api/events/${encodeURIComponent(eventId)}`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) return;
+      const seats = parseTakenSeats(await response.json());
+      if (seats) setTakenSeats(seats);
+    } catch {
+      // Zostaje ostatni znany stan — spróbujemy przy następnym odświeżeniu.
+    }
+  }, [eventId]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    async function refresh() {
-      try {
-        const response = await fetch(
-          `/api/events/${encodeURIComponent(eventId)}`,
-          {
-            cache: "no-store",
-            signal: controller.signal,
-          },
-        );
-        if (!response.ok) throw new Error("Nie udało się odświeżyć widowni");
-        const data = await response.json();
-        if (
-          !Array.isArray(data.takenSeats) ||
-          !data.takenSeats.every((seat: unknown) => typeof seat === "string")
-        ) {
-          throw new Error("Nieprawidłowe dane widowni");
-        }
-        if (controller.signal.aborted) return;
-        setTakenSeats(data.takenSeats);
-        setRefreshError(null);
-      } catch {
-        if (!controller.signal.aborted) {
-          setRefreshError(
-            "Nie udało się odświeżyć dostępności. Spróbujemy ponownie za chwilę.",
-          );
-        }
-      } finally {
-        if (!controller.signal.aborted) timer = setTimeout(refresh, 15_000);
-      }
-    }
-    void refresh();
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
+    if (reserved) return;
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
     };
-  }, [eventId, refreshVersion]);
+    const interval = setInterval(refreshIfVisible, REFRESH_MS);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [refresh, reserved]);
 
-  const isTaken = (seatId: string) => takenSeats.includes(seatId);
-  const selectionTaken = selectedSeat !== null && isTaken(selectedSeat);
+  // Wybrany fotel zajął w międzyczasie ktoś inny (wynik odświeżenia).
+  const selectionLost =
+    !reserved && selectedSeat !== null && takenSeats.includes(selectedSeat);
+  const activeSeat = selectionLost ? null : selectedSeat;
+  const message = notice ?? (selectionLost ? SEAT_TAKEN_MESSAGE : null);
+  const freeCount = ROWS.length * SEATS.length - takenSeats.length;
+  const date = formatEventDate(event.date);
+
+  function selectSeat(seatId: string) {
+    setSelectedSeat(seatId);
+    setNotice(null);
+    // Na węższym ekranie formularz jest pod planem — przewijamy do niego.
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)")
+        .matches;
+      requestAnimationFrame(() =>
+        panelRef.current?.scrollIntoView({
+          behavior: smooth ? "smooth" : "auto",
+          block: "start",
+        }),
+      );
+    }
+  }
+
+  function handleSeatTaken() {
+    setNotice(SEAT_TAKEN_MESSAGE);
+    setSelectedSeat(null);
+    void refresh();
+  }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div
-        className="overflow-x-auto rounded-xl border border-gray-300 bg-gray-50 p-2 sm:p-4"
-        aria-label="Plan widowni"
-      >
-        <div className="min-w-[500px]">
-          <div className="theatre-stage mx-auto flex w-full max-w-xl items-center justify-center text-sm font-semibold uppercase tracking-[0.3em]">
-            Scena
-          </div>
-          <div className="space-y-2">
-            {ROWS.map((row) => (
-              <div
-                key={row}
-                className="grid grid-cols-[1.5rem_repeat(10,minmax(0,1fr))] gap-1 sm:gap-2"
-              >
-                <span
-                  className="flex items-center justify-center text-sm font-semibold"
-                  aria-label={`Rząd ${row}`}
-                >
-                  {row}
-                </span>
+    <div className="grid gap-5 lg:grid-cols-[13rem_minmax(0,1fr)_21rem] lg:items-start">
+      <aside className="card p-6 lg:p-7">
+        <h2 className="title text-xl">Informacje</h2>
+        <dl className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-1">
+          <Fact
+            label="Data"
+            value={date ? `${date.day} ${date.month}` : event.date}
+            hint={date?.weekday}
+          />
+          <Fact label="Godzina" value={event.time} numeric />
+          <Fact label="Scena" value={event.stage} />
+          <Fact
+            label="Cena"
+            value={
+              Number.isSafeInteger(event.price) && event.price >= 0
+                ? formatPrice(event.price)
+                : "Chwilowo niedostępna"
+            }
+            numeric
+          />
+          <Fact label="Wolne miejsca" value={String(freeCount)} numeric />
+        </dl>
+      </aside>
+
+      <section aria-label="Plan widowni" className="card px-4 py-8 sm:px-8">
+        <div className="mx-auto max-w-md">
+          <div className="h-2 rounded-full bg-linear-to-r from-gold/0 via-gold/70 to-gold/0" />
+          <p className="label mt-3 text-center">Scena</p>
+        </div>
+
+        <div className="mx-auto mt-10 flex max-w-lg flex-col gap-2 sm:gap-2.5">
+          {ROWS.map((row) => (
+            <div key={row} className="flex items-center gap-2 sm:gap-3">
+              <span className="w-4 shrink-0 text-center text-xs font-medium text-muted">
+                {row}
+              </span>
+              <div className="grid flex-1 grid-cols-[repeat(5,minmax(0,1fr))_0.5rem_repeat(5,minmax(0,1fr))] gap-1.5 sm:grid-cols-[repeat(5,minmax(0,1fr))_1.25rem_repeat(5,minmax(0,1fr))] sm:gap-2">
                 {SEATS.map((seat) => {
                   const seatId = `${row}${seat}`;
-                  const taken = isTaken(seatId);
-                  const selected = selectedSeat === seatId && !taken;
-
+                  const taken = takenSeats.includes(seatId);
                   return (
-                    <button
+                    <SeatButton
                       key={seatId}
-                      type="button"
-                      aria-label={`Rząd ${row}, miejsce ${seat}${taken ? ", zajęte" : ", wolne"}`}
-                      aria-pressed={selected}
-                      disabled={taken}
-                      onClick={() => {
-                        setSelectedSeat(seatId);
-                        setSeatMessage(null);
-                      }}
-                      className={[
-                        "flex h-11 items-center justify-center rounded-md border text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700",
-                        taken
-                          ? "cursor-not-allowed border-gray-300 bg-gray-300 text-gray-500"
-                          : selected
-                            ? "border-emerald-600 bg-emerald-100 text-emerald-900"
-                            : "border-gray-300 bg-white text-gray-800 hover:border-emerald-600 hover:text-emerald-800",
-                      ].join(" ")}
-                    >
-                      {seat}
-                    </button>
+                      number={seat}
+                      label={`${formatSeat(seatId)}${taken ? ", zajęte" : ""}`}
+                      taken={taken}
+                      selected={activeSeat === seatId}
+                      aisleBefore={seat === AISLE_AFTER + 1}
+                      onSelect={() => selectSeat(seatId)}
+                    />
                   );
                 })}
               </div>
-            ))}
-          </div>
+              <span className="w-4 shrink-0 text-center text-xs font-medium text-muted">
+                {row}
+              </span>
+            </div>
+          ))}
         </div>
-      </div>
 
-      <p className="text-sm text-gray-600">
-        Jasne — wolne · Przygaszone — zajęte · Złote — wybrane. Dostępność
-        odświeżamy co 15 sekund. Na małym ekranie przesuń plan w bok.
-      </p>
-      {refreshError && (
-        <p role="status" className="text-sm text-amber-800">
-          {refreshError}
-        </p>
-      )}
-      {(seatMessage || selectionTaken) && (
-        <p role="alert" className="text-sm text-red-600">
-          {seatMessage ?? "Ktoś był szybszy — wybierz inne miejsce"}
-        </p>
-      )}
+        <ul className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted">
+          <Legend className="border border-line bg-paper">Wolne</Legend>
+          <Legend className="bg-gold">Twój wybór</Legend>
+          <Legend className="bg-seat-taken">Zajęte</Legend>
+        </ul>
+      </section>
 
-      {selectedSeat && !selectionTaken ? (
-        <ReservationForm
-          key={selectedSeat}
-          eventId={eventId}
-          seatId={selectedSeat}
-          onSeatTaken={() => {
-            setTakenSeats((seats) => [...seats, selectedSeat]);
-            setSelectedSeat(null);
-            setSeatMessage("Ktoś był szybszy — wybierz inne miejsce");
-            setRefreshVersion((version) => version + 1);
-          }}
-        />
-      ) : (
-        <p className="rounded border border-dashed border-gray-300 p-4 text-sm text-gray-600">
-          Wybierz wolne miejsce na widowni, aby zarezerwować bilet.
-        </p>
-      )}
+      <aside
+        ref={panelRef}
+        aria-live="polite"
+        className="flex scroll-mt-6 flex-col gap-4"
+      >
+        {message && (
+          <p role="alert" className="alert">
+            {message}
+          </p>
+        )}
+
+        {activeSeat ? (
+          <ReservationForm
+            key={activeSeat}
+            eventId={eventId}
+            seatId={activeSeat}
+            onSeatTaken={handleSeatTaken}
+            onReserved={() => setReserved(true)}
+          />
+        ) : (
+          <div className="card p-7">
+            <h2 className="title text-2xl">Rezerwacja</h2>
+            <p className="mt-3 text-sm leading-relaxed text-muted">
+              Wybierz wolny fotel na planie widowni. Potem podasz imię i e-mail,
+              a miejsce będzie na Ciebie czekać do zakupu biletu.
+            </p>
+          </div>
+        )}
+      </aside>
     </div>
+  );
+}
+
+function Fact({
+  label,
+  value,
+  hint,
+  numeric = false,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  numeric?: boolean;
+}) {
+  return (
+    <div>
+      <dt className="label text-muted">{label}</dt>
+      <dd className={`mt-1 text-ink ${numeric ? "numerals" : ""}`}>{value}</dd>
+      {hint && <dd className="text-sm text-muted">{hint}</dd>}
+    </div>
+  );
+}
+
+function Legend({
+  className,
+  children,
+}: {
+  className: string;
+  children: string;
+}) {
+  return (
+    <li className="flex items-center gap-2">
+      <span className={`size-3 rounded-[4px] ${className}`} />
+      {children}
+    </li>
+  );
+}
+
+type SeatButtonProps = {
+  number: number;
+  label: string;
+  taken: boolean;
+  selected: boolean;
+  aisleBefore: boolean;
+  onSelect: () => void;
+};
+
+function SeatButton({
+  number,
+  label,
+  taken,
+  selected,
+  aisleBefore,
+  onSelect,
+}: SeatButtonProps) {
+  return (
+    <>
+      {aisleBefore && <span aria-hidden="true" />}
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={selected}
+        disabled={taken}
+        onClick={onSelect}
+        className={[
+          "flex aspect-square items-center justify-center rounded-lg text-[10px] font-medium transition duration-200 numerals sm:text-[11px]",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold",
+          taken
+            ? "cursor-not-allowed bg-seat-taken text-transparent"
+            : selected
+              ? "bg-gold font-semibold text-surface"
+              : "border border-line bg-paper text-muted hover:border-gold hover:text-gold active:scale-95",
+        ].join(" ")}
+      >
+        {number}
+      </button>
+    </>
   );
 }
