@@ -37,7 +37,7 @@ async function ReservationDetails({
   const cancelled = (await searchParams).anulowano === "1";
   if (!reservationIdSchema.safeParse(id).success) notFound();
 
-  // Do klienta trafiają tylko pola potrzebne na ekranie (bez imienia i e-maila).
+  // E-mail rezerwacji służy do odczytu salda; nie przenosimy go w URL strony.
   const reservation = await reservationsCollection().findOne(
     { _id: new ObjectId(id) },
     {
@@ -48,6 +48,7 @@ async function ReservationDetails({
         expiresAt: 1,
         code: 1,
         amount: 1,
+        email: 1,
       },
     },
   );
@@ -78,7 +79,7 @@ async function ReservationDetails({
         <p className="mt-2 font-medium">{formatSeat(reservation.seatId)}</p>
         {amount !== null && (
           <p className="mt-2 font-semibold">
-            Do zapłaty: {formatPrice(amount)}
+            Cena biletu: {formatPrice(amount)}
           </p>
         )}
       </div>
@@ -89,6 +90,8 @@ async function ReservationDetails({
       >
         {amount !== null ? (
           <CheckoutButton
+            key={`${id}:${reservation.email}`}
+            email={reservation.email}
             amount={amount}
             cancelled={cancelled}
             reservationId={id}

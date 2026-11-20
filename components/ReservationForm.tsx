@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 import { z } from "zod";
 import { formatSeat } from "@/lib/format";
 import { createReservationSchema } from "@/lib/schemas";
+import { LoyaltyBalance } from "@/components/LoyaltyBalance";
 
 type Field = "customerName" | "email";
 type FieldErrors = Partial<Record<Field, string>>;
@@ -135,6 +136,8 @@ export function ReservationForm({ eventId, seatId, onSeatTaken }: Props) {
           </p>
         )}
       </div>
+
+      <LoyaltyBalance email={email} />
 
       {formError && (
         <p role="alert" className="text-sm text-red-600">

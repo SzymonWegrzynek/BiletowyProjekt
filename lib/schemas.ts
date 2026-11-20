@@ -1,5 +1,6 @@
 import type { ObjectId } from "mongodb";
 import { z } from "zod";
+import type { EmailOperation } from "./email-state.ts";
 
 // Domyślne komunikaty Zoda po polsku (kontrakt: błędy po polsku).
 z.config(z.locales.pl());
@@ -75,6 +76,12 @@ export type Reservation = CreateReservationInput & {
   status: "held" | "purchased";
   // Starsze rezerwacje Etapu I mogą nie mieć zapisanej kwoty.
   amount?: number;
+  // Wynik naliczenia przez backend po zakupie; starsze rekordy go nie mają.
+  pointsEarned?: number;
+  pointsUsed?: number;
+  // Utrwalona kwota faktycznie zapłacona kartą, w groszach.
+  cardAmount?: number;
+  confirmationEmail?: EmailOperation;
   expiresAt: Date;
   code?: string;
   createdAt: Date;

@@ -1,4 +1,12 @@
 const ERRORS = {
+  RESERVATION_UNAVAILABLE: {
+    status: 503,
+    message: "Nie udało się odczytać rezerwacji. Spróbuj ponownie.",
+  },
+  LOYALTY_UNAVAILABLE: {
+    status: 503,
+    message: "Usługa punktów jest chwilowo niedostępna. Spróbuj ponownie.",
+  },
   VALIDATION_ERROR: { status: 400, message: "Niepoprawne dane" },
   NOT_FOUND: { status: 404, message: "Nie znaleziono" },
   SEAT_TAKEN: {
