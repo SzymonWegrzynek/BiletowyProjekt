@@ -2,7 +2,7 @@
 
 Projekt zespołowy z przedmiotu **Projektowanie i Architektura Systemów**.
 Klient wybiera spektakl i miejsce, rezerwuje je na 15 minut, a potem kupuje bilet i dostaje kod.
-Etap I działa bez płatności online.
+Etap I działa bez płatności online, Etap II dodaje płatności **Stripe Checkout** (tryb testowy).
 
 ## Zespół
 
@@ -26,6 +26,7 @@ Zadania: Trello → workspace **BiletowyProjekt**, tablica **Taski**.
 | Jakość kodu | **ESLint + Prettier**                                               |
 | Paczki      | **pnpm**                                                            |
 | Hosting     | **Vercel**                                                          |
+| Płatności   | **Stripe Checkout** (tryb testowy) + paczka `stripe`                |
 
 Wszystko jest w **jednym projekcie i jednym repo**. Front i backend (`app/api`) działają razem w Next.js.
 
@@ -105,6 +106,9 @@ Baza jest **wspólna, w chmurze (Atlas)** — nie trzeba niczego instalować lok
 | `MONGODB_DB_TEST`         | baza dla `pnpm test`: `teatr-test` (domyślnie) |
 | `RESERVATION_TTL_MINUTES` | czas ważności rezerwacji w minutach (15)       |
 | `RESERVATION_RATE_LIMIT`  | rezerwacje z 1 IP na 10 s, potem 429 (30)      |
+| `STRIPE_SECRET_KEY`       | klucz testowy Stripe `sk_test_…`               |
+| `STRIPE_WEBHOOK_SECRET`   | sekret webhooka `whsec_…`                      |
+| `APP_URL`                 | adres aplikacji, np. `http://localhost:3000`   |
 
 - Pliku `.env` **nie commitujemy**. Adres bazy przekazujemy sobie prywatnie.
 - Nowa zmienna = wpis w `.env.example`.
@@ -284,6 +288,47 @@ git fetch --prune                 # usuwa lokalne odnośniki do skasowanych gał
 Po Squash and merge `git branch -d` może zgłosić, że gałąź „nie jest w pełni zmergowana” (bo na `main` jest nowy, spłaszczony commit). Jeśli PR na GitHubie ma status **Merged**, usuń ją przez `git branch -D`.
 
 Nie usuwamy `main` i gałęzi z otwartym PR.
+
+## Płatności (Etap II)
+
+Klient płaci na stronie **Stripe Checkout**. Rezerwacja staje się opłacona dopiero po webhooku `checkout.session.completed` z poprawnym podpisem. Powrót na `success_url` niczego nie dowodzi.
+
+| Endpoint                              | Co robi                                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| `POST /api/reservations/:id/checkout` | tworzy sesję Checkout z kwotą `amount` z bazy → `{ url }`; 404 / 409 / 410 / 503 |
+| `GET /api/reservations/:id`           | `{ status: "held" \| "paid" \| "expired", amount, expiresAt, code? }`            |
+| `POST /api/webhooks/stripe`           | potwierdza płatność: `held` → `purchased` + kod biletu                           |
+
+### Stripe lokalnie
+
+1. W panelu Stripe przełącz się na **tryb testowy** i skopiuj `sk_test_…` do `STRIPE_SECRET_KEY` w `.env` (klucz dostajesz od Pawła prywatnie).
+2. Zainstaluj [Stripe CLI](https://docs.stripe.com/stripe-cli), zaloguj się (`stripe login`) i przekieruj webhooki na lokalny serwer:
+
+   ```bash
+   stripe listen --forward-to localhost:3000/api/webhooks/stripe
+   ```
+
+3. CLI wypisze `whsec_…` — wklej go do `STRIPE_WEBHOOK_SECRET` i uruchom ponownie `pnpm dev`.
+4. Ręczne zdarzenie testowe: `stripe trigger checkout.session.completed`.
+
+Na Vercelu webhook jest ustawiony w panelu Stripe (test) na `https://<adres-vercela>/api/webhooks/stripe` ze zdarzeniem `checkout.session.completed`, a jego sekret jest w zmiennych Vercela.
+
+### Karty testowe
+
+| Karta                 | Wynik            |
+| --------------------- | ---------------- |
+| `4242 4242 4242 4242` | płatność udana   |
+| `4000 0000 0000 0002` | odmowa           |
+| `4000 0025 0000 3155` | wymaga 3D Secure |
+
+Dowolna przyszła data ważności, dowolny CVC i kod pocztowy.
+
+### Zagrożenia Etapu II
+
+- **Stripe nie odpowiada:** klient Stripe ma timeout 8 s i jedno ponowienie. Awaria daje `503 PAYMENT_UNAVAILABLE` z `Retry-After` zamiast 500, a rezerwacja zostaje ważna, więc klient może zapłacić ponownie (lekcja E04).
+- **Podwójna płatność:** nowe „Zapłać” wygasza poprzednią sesję Checkout tej rezerwacji, więc naraz da się opłacić tylko jedną.
+
+> ⚠️ Po zmianie modelu danych (Etap II) trzeba ponownie uruchomić `pnpm db:setup` na `teatr-test` (każdy u siebie) i na `teatr` (lider), żeby spektakle miały `price`.
 
 ## Hosting
 

@@ -78,6 +78,7 @@ describe.skipIf(!process.env.MONGODB_URI)("POST /api/reservations", () => {
       status,
       expiresAt,
       createdAt: new Date(),
+      amount: 6000,
       ...(status === "purchased" && { code: `TEA-${randomUUID()}` }),
     };
   }
@@ -106,7 +107,11 @@ describe.skipIf(!process.env.MONGODB_URI)("POST /api/reservations", () => {
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(Object.keys(json).sort()).toEqual(["expiresAt", "reservationId"]);
+    expect(Object.keys(json).sort()).toEqual([
+      "amount",
+      "expiresAt",
+      "reservationId",
+    ]);
     expect(json.reservationId).toMatch(/^[0-9a-f]{24}$/);
     expect(new Date(json.expiresAt).toISOString()).toBe(json.expiresAt);
 
