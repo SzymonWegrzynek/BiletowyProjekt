@@ -82,6 +82,10 @@ export type Reservation = CreateReservationInput & {
   checkoutSessionId?: string;
   // Ustawia webhook po potwierdzeniu płatności, razem z `code`.
   paidAt?: Date;
+  // Sesja Checkout, która opłaciła rezerwację (ustawia webhook). Odróżnia
+  // ponowiony webhook tej samej sesji od drugiej płatności (→ zwrot).
+  // checkoutSessionId nie wystarcza — nadpisuje go każde nowe „Zapłać”.
+  paidSessionId?: string;
   code?: string;
   createdAt: Date;
 };
