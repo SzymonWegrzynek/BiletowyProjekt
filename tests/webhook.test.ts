@@ -363,16 +363,13 @@ describe.skipIf(!process.env.MONGODB_URI)("webhook Stripe", () => {
   });
 
   it("zwrot się nie udał (Stripe nie odpowiada) → 500, żeby Stripe ponowił", async () => {
-    const doc = await insert();
-    const id = doc._id.toHexString();
-    await send(sessionEvent(id, { sessionId: "cs_test_r" }));
     stripeMock.refund.mockRejectedValueOnce(
       new Stripe.errors.StripeConnectionError({
         message: "timeout",
         type: "api_error",
       }),
     );
-    const res = await send(sessionEvent(id, { sessionId: "cs_test_s" }));
+    const res = await send(sessionEvent(new ObjectId().toHexString()));
     expect(res.status).toBe(500);
   });
 
