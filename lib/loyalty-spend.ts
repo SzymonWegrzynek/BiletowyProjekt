@@ -15,11 +15,13 @@ const SPEND_LOCK_MS = 20_000;
 
 // Na karcie jest mniej punktów, niż klient chce wydać → 4xx dla klienta.
 export class InsufficientPointsError extends Error {
-  constructor(
-    readonly available: number,
-    readonly requested: number,
-  ) {
+  readonly available: number;
+  readonly requested: number;
+
+  constructor(available: number, requested: number) {
     super(`Za mało punktów: dostępne ${available}, potrzebne ${requested}`);
+    this.available = available;
+    this.requested = requested;
   }
 }
 

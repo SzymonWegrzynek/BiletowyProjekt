@@ -357,6 +357,27 @@ Saldo punktów trzyma **Voucherify** (kampania lojalnościowa, klient identyfiko
 - **Wydawanie punktów** (`lib/loyalty-spend.ts`, dla checkoutu z punktami): `spendLoyaltyPoints({ email, reservationId, attempt, points })` — operacja `redeem:<reservationId>:<attempt>`, więc powtórzony checkout potrąca raz. Wydawanie jednego klienta idzie po kolei (blokada na koncie), a saldo z Voucherify jest sprawdzane tuż przed potrąceniem. Saldo może się zmienić także poza aplikacją: gdy po potrąceniu wyjdzie ujemne, punkty wracają, a klient dostaje odmowę (`InsufficientPointsError`). `returnSpentPoints({ reservationId, attempt })` oddaje punkty po nieukończonej płatności albo anuluje potrącenie, które jeszcze się nie wykonało.
 - Testy zawsze na atrapie (`tests/fixtures/fake-voucherify.ts`) — Sandbox ma limit 100 wywołań API na godzinę.
 
+### Awarie Voucherify i zaległe operacje
+
+Lekcja E04: awaria programu lojalnościowego nie może dać fałszywego salda ani zgubić rozliczenia zakupu.
+
+- **Timeouty i limit:** każde zapytanie ma timeout 5 s. Odczyt (saldo, historia karty) ponawiamy raz po krótkiej przerwie albo po krótkim `Retry-After`. Zmian salda nie ponawiamy w adapterze nigdy, bo ich wynik rozstrzyga rejestr operacji. Po `429` nie pytamy Voucherify, dopóki limit nie minie (`Retry-After` / `X-Rate-Limit-Retry`, domyślnie 30 s), żeby go nie przedłużać.
+- **Saldo:** błąd odczytu → `503 LOYALTY_UNAVAILABLE`, nigdy `0` ani nowy bonus. Bez potwierdzonego salda płatność punktami nie rusza.
+- **Bilet ważniejszy od punktów:** awaria przy nagrodzie po zapłacie zostawia bilet i `pointsEarnedStatus: "pending"`.
+
+**Jak znaleźć i dokończyć zaległe operacje:**
+
+```bash
+pnpm loyalty:pending                          # lista: nagrody do dopisania, niedokończone i odrzucone operacje
+pnpm loyalty:pending --finish                 # dokończ (bezpieczne do ponawiania, najwyżej 20 pozycji na raz)
+pnpm loyalty:pending --finish --email=jan@example.com
+```
+
+- Dokańczanie jest bezpieczne, bo każda operacja ma stałe id i wykonuje się najwyżej raz. Operacje `unknown` są rozstrzygane po historii karty dopiero 60 s po niepewnej próbie.
+- Skrypt dokańcza tylko dopisania (`bonus:`, `earn:`) i zwroty (`return:`). Niedokończonych potrąceń (`redeem:`) nie wykonuje, bo zabrałyby punkty za płatność, której klient mógł nie dokończyć. Rozstrzyga je ścieżka płatności (`returnSpentPoints`).
+- Na limicie zapytań skrypt przerywa pracę. Uruchom go ponownie po czasie z komunikatu.
+- Operacje `failed` (odrzucone przez Voucherify) wymagają ręcznego sprawdzenia w panelu Voucherify.
+
 ## Hosting
 
 Lekcja E04: gdy webhook płatności się opóźnia, UI po 30 sekundach informuje o oczekiwaniu, sprawdza status co 10 sekund i pozwala sprawdzić go ręcznie; bilet pokazuje wyłącznie po odpowiedzi API `paid` z kodem, nigdy na podstawie powrotu ze Stripe.
