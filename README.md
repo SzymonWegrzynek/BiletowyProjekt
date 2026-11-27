@@ -352,6 +352,7 @@ Saldo punktów trzyma **Voucherify** (kampania lojalnościowa, klient identyfiko
 - Bonus 1000 punktów to operacja o stałym id `bonus:<email>` w `loyaltyOperations`: powstaje raz (unikalne `_id`), a wykonuje ją tylko ten, kto warunkowym zapisem zmieni `pending` → `applying`. Kolejne odczyty nie przyznają go drugi raz.
 - Voucherify nie ma kluczy idempotencji, dlatego każda zmiana salda ma `source_id` = id naszej operacji.
 - Awaria Voucherify (timeout, limit, 5xx, brak kluczy) → `503 LOYALTY_UNAVAILABLE` z `Retry-After`. Nigdy nie pokazujemy salda 0 zamiast błędu.
+- **Punkty za zakup:** webhook Stripe w tym samym warunkowym zapisie `held` → `purchased` zapisuje `cardAmount` (kwota zapłacona kartą w opłaconej sesji, `amount_total` z podpisanego zdarzenia) i `pointsEarned = floor(cardAmount / 100) * 10`. Punkty od części opłaconej punktami się nie należą. Potem dopisuje je w Voucherify jako operację `earn:<reservationId>` (najwyżej raz) i ustawia `pointsEarnedStatus: "done"`. Awaria Voucherify nie zabiera biletu: nagroda zostaje `pending`, a ponowiony webhook ją dokańcza.
 - Testy zawsze na atrapie (`tests/fixtures/fake-voucherify.ts`) — Sandbox ma limit 100 wywołań API na godzinę.
 
 ## Hosting

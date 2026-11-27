@@ -86,6 +86,13 @@ export type Reservation = CreateReservationInput & {
   // ponowiony webhook tej samej sesji od drugiej płatności (→ zwrot).
   // checkoutSessionId nie wystarcza — nadpisuje go każde nowe „Zapłać”.
   paidSessionId?: string;
+  // Rozliczenie punktów po opłaceniu (ustawia webhook razem z `code`).
+  // cardAmount = kwota faktycznie zapłacona kartą w opłaconej sesji (grosze),
+  // pointsEarned = nagroda od tej kwoty. pointsEarnedStatus: "pending" dopóki
+  // Voucherify nie potwierdzi dopisania punktów, potem "done".
+  cardAmount?: number;
+  pointsEarned?: number;
+  pointsEarnedStatus?: "pending" | "done";
   code?: string;
   createdAt: Date;
 };
