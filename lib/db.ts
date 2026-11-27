@@ -1,5 +1,11 @@
 import { MongoClient, type Db } from "mongodb";
-import type { Event, RateLimitWindow, Reservation } from "./schemas.ts";
+import type {
+  Event,
+  LoyaltyAccount,
+  LoyaltyOperation,
+  RateLimitWindow,
+  Reservation,
+} from "./schemas.ts";
 
 // Jeden klient na proces: hot reload w dev nie może otwierać nowych połączeń.
 const globalForMongo = globalThis as typeof globalThis & {
@@ -41,6 +47,14 @@ export function reservationsCollection() {
 
 export function rateLimitsCollection() {
   return getDb().collection<RateLimitWindow>("rateLimits");
+}
+
+export function loyaltyAccountsCollection() {
+  return getDb().collection<LoyaltyAccount>("loyaltyAccounts");
+}
+
+export function loyaltyOperationsCollection() {
+  return getDb().collection<LoyaltyOperation>("loyaltyOperations");
 }
 
 // Indeksy pilnują invariantów: jedno miejsce = jeden dokument, jeden kod = jeden bilet.

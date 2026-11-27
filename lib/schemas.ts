@@ -90,6 +90,43 @@ export type Reservation = CreateReservationInput & {
   createdAt: Date;
 };
 
+// E-mail klienta programu lojalnościowego: ten sam format co w rezerwacji,
+// małymi literami — „Jan@X.pl” i „jan@x.pl” to jedno konto punktowe.
+export const loyaltyEmailSchema = createReservationSchema.shape.email.transform(
+  (email) => email.toLowerCase(),
+);
+
+// Powiązanie e-maila z kartą lojalnościową w Voucherify. Saldo trzyma
+// wyłącznie Voucherify — tu jest tylko kod karty.
+export type LoyaltyAccount = {
+  _id: string; // znormalizowany e-mail
+  cardCode?: string;
+  createdAt: Date;
+  joinedAt?: Date;
+};
+
+// Jedna zmiana salda w Voucherify (bonus, nagroda, potrącenie) ze stabilnym
+// identyfikatorem. Unikalne _id gwarantuje, że operacja istnieje raz;
+// status mówi, czy już się wykonała.
+export type LoyaltyOperation = {
+  _id: string; // np. "bonus:<email>", "earn:<reservationId>"
+  email: string;
+  cardCode: string;
+  points: number; // > 0 dodanie, < 0 potrącenie
+  reason: string;
+  // pending: czeka na wykonanie; applying: ktoś ją właśnie wykonuje (lease);
+  // done: Voucherify potwierdził zmianę.
+  status: "pending" | "applying" | "done";
+  attempts: number;
+  leaseToken?: string;
+  leaseUntil?: Date;
+  balanceAfter?: number;
+  lastError?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  doneAt?: Date;
+};
+
 // Status rezerwacji w API (GET /api/reservations/:id). W bazie zostaje
 // held / purchased; "expired" to held po expiresAt, liczone przez serwer.
 export type ReservationApiStatus = "held" | "paid" | "expired";

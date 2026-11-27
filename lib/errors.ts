@@ -21,6 +21,10 @@ const ERRORS = {
     status: 503,
     message: "Płatności chwilowo niedostępne, spróbuj za chwilę",
   },
+  LOYALTY_UNAVAILABLE: {
+    status: 503,
+    message: "Usługa punktów jest chwilowo niedostępna. Spróbuj ponownie.",
+  },
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

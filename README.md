@@ -99,16 +99,20 @@ Baza jest **wspólna, w chmurze (Atlas)** — nie trzeba niczego instalować lok
 
 ## Zmienne środowiskowe
 
-| Zmienna                   | Opis                                           |
-| ------------------------- | ---------------------------------------------- |
-| `MONGODB_URI`             | adres klastra Atlas (z hasłem)                 |
-| `MONGODB_DB`              | wspólna baza aplikacji: `teatr`                |
-| `MONGODB_DB_TEST`         | baza dla `pnpm test`: `teatr-test` (domyślnie) |
-| `RESERVATION_TTL_MINUTES` | czas ważności rezerwacji w minutach (15)       |
-| `RESERVATION_RATE_LIMIT`  | rezerwacje z 1 IP na 10 s, potem 429 (30)      |
-| `STRIPE_SECRET_KEY`       | klucz testowy Stripe `sk_test_…`               |
-| `STRIPE_WEBHOOK_SECRET`   | sekret webhooka `whsec_…`                      |
-| `APP_URL`                 | adres aplikacji, np. `http://localhost:3000`   |
+| Zmienna                   | Opis                                              |
+| ------------------------- | ------------------------------------------------- |
+| `MONGODB_URI`             | adres klastra Atlas (z hasłem)                    |
+| `MONGODB_DB`              | wspólna baza aplikacji: `teatr`                   |
+| `MONGODB_DB_TEST`         | baza dla `pnpm test`: `teatr-test` (domyślnie)    |
+| `RESERVATION_TTL_MINUTES` | czas ważności rezerwacji w minutach (15)          |
+| `RESERVATION_RATE_LIMIT`  | rezerwacje z 1 IP na 10 s, potem 429 (30)         |
+| `STRIPE_SECRET_KEY`       | klucz testowy Stripe `sk_test_…`                  |
+| `STRIPE_WEBHOOK_SECRET`   | sekret webhooka `whsec_…`                         |
+| `APP_URL`                 | adres aplikacji, np. `http://localhost:3000`      |
+| `VOUCHERIFY_APP_ID`       | Voucherify: Application ID (Sandbox)              |
+| `VOUCHERIFY_SECRET_KEY`   | Voucherify: Secret Key (Sandbox)                  |
+| `VOUCHERIFY_CAMPAIGN_ID`  | id kampanii lojalnościowej `camp_…`               |
+| `VOUCHERIFY_API_URL`      | adres API (domyślnie `https://api.voucherify.io`) |
 
 - Pliku `.env` **nie commitujemy**. Adres bazy przekazujemy sobie prywatnie.
 - Nowa zmienna = wpis w `.env.example`.
@@ -118,10 +122,12 @@ Baza jest **wspólna, w chmurze (Atlas)** — nie trzeba niczego instalować lok
 
 ## Baza danych
 
-| Kolekcja       | Pola                                                                                                      |
-| -------------- | --------------------------------------------------------------------------------------------------------- |
-| `events`       | `_id`, `title`, `date`, `time`, `stage`                                                                   |
-| `reservations` | `_id`, `eventId`, `seatId`, `customerName`, `email`, `status` (`held` / `purchased`), `expiresAt`, `code` |
+| Kolekcja            | Pola                                                                                                                 |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `events`            | `_id`, `title`, `date`, `time`, `stage`                                                                              |
+| `reservations`      | `_id`, `eventId`, `seatId`, `customerName`, `email`, `status` (`held` / `purchased`), `expiresAt`, `code`            |
+| `loyaltyAccounts`   | `_id` (e-mail), `cardCode`, `createdAt`, `joinedAt`                                                                  |
+| `loyaltyOperations` | `_id` (id operacji), `email`, `cardCode`, `points`, `reason`, `status` (`pending` / `applying` / `done`), `attempts` |
 
 **Indeksy** (tworzone przez `pnpm db:setup`):
 
@@ -333,6 +339,20 @@ Dowolna przyszła data ważności, dowolny CVC i kod pocztowy.
 - **Podwójna płatność:** nowe „Zapłać” wygasza poprzednią sesję Checkout tej rezerwacji, więc naraz da się opłacić tylko jedną.
 
 > ⚠️ Po zmianie modelu danych (Etap II) trzeba ponownie uruchomić `pnpm db:setup` na `teatr-test` (każdy u siebie) i na `teatr` (lider), żeby spektakle miały `price`.
+
+## Punkty lojalnościowe (Etap III)
+
+Saldo punktów trzyma **Voucherify** (kampania lojalnościowa, klient identyfikowany e-mailem) — to jedyne źródło prawdy, bo klient może zbierać punkty także w innych kanałach. Nasza baza trzyma tylko powiązanie e-mail → karta (`loyaltyAccounts`) i rejestr zmian salda (`loyaltyOperations`). Adapter: `lib/voucherify.ts` (zwykły `fetch`, timeout 5 s, klucze tylko na serwerze).
+
+| Endpoint                   | Co robi                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| `GET /api/loyalty?email=…` | `{ email, points }`; nowy klient dostaje 1000 punktów; 400 zły e-mail; 503 awaria |
+
+- E-mail normalizujemy (`trim` + małe litery), więc `Jan@X.pl` i `jan@x.pl` to jedno konto.
+- Bonus 1000 punktów to operacja o stałym id `bonus:<email>` w `loyaltyOperations`: powstaje raz (unikalne `_id`), a wykonuje ją tylko ten, kto warunkowym zapisem zmieni `pending` → `applying`. Kolejne odczyty nie przyznają go drugi raz.
+- Voucherify nie ma kluczy idempotencji, dlatego każda zmiana salda ma `source_id` = id naszej operacji.
+- Awaria Voucherify (timeout, limit, 5xx, brak kluczy) → `503 LOYALTY_UNAVAILABLE` z `Retry-After`. Nigdy nie pokazujemy salda 0 zamiast błędu.
+- Testy zawsze na atrapie (`tests/fixtures/fake-voucherify.ts`) — Sandbox ma limit 100 wywołań API na godzinę.
 
 ## Hosting
 
