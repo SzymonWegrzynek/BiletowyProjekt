@@ -50,6 +50,7 @@ function reservation(
     status,
     expiresAt: new Date(now + expiresInMs),
     createdAt: new Date(now),
+    amount: 6000,
     ...(status === "purchased" ? { code: `TEA-${seatId}TEST` } : {}),
   };
 }

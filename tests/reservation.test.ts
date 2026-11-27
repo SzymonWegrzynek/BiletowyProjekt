@@ -76,6 +76,7 @@ describe.skipIf(!process.env.MONGODB_URI)(
         status,
         expiresAt,
         createdAt: now,
+        amount: 6000,
         ...(status === "purchased" && { code: `TEA-${seatId}` }),
       };
     }
