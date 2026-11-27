@@ -277,6 +277,7 @@ Ponowny zakup tej samej rezerwacji **zwraca ten sam kod**, nie tworzy drugiego b
 - Webhook `checkout.session.expired` z `attemptId` → zwrot punktów. Voucherify nie odpowiada → 500 (Stripe ponowi), próba zostaje `returning`.
 - Zaległe próby dokańcza `pnpm loyalty:pending --finish` (`returning`; `spending` starsze niż czas życia sesji + 5 min; `open` po czasie sesji — decyduje stan sesji w Stripe).
 - Drugi mechanizm (`lib/loyalty-spend.ts`, `releaseSpendIfUnused`): punkty z **wygasłej rezerwacji** wracają przy odczycie salda, webhooku albo skrypcie, a rezerwacja dostaje `pointsReleasedAt` (spóźniona płatność → zwrot `points_released`). Oba mechanizmy zwracają tą samą operacją `return:<rezerwacja>:<próba>`, więc punkty wracają najwyżej raz; webhook domyka też stan próby.
+- Mail z biletem (karta C, `lib/server/send-ticket-confirmation.ts`): webhook wysyła go po zapisie biletu i nagrody; ponowiony webhook nie wysyła drugi raz (stan `confirmationEmail` przy rezerwacji). Błąd poczty nie psuje zakupu. Bez `RESEND_API_KEY` wysyłka jest pomijana.
 - Wygaszenie sesji: `expireCheckoutSessionQuietly()` zwraca `true` tylko przy potwierdzonym `expired` — tylko wtedy wolno oddać punkty.
 
 ### Walidacja

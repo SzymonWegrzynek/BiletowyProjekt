@@ -6,6 +6,7 @@ import { z } from "zod";
 import { Spinner } from "@/components/Spinner";
 import { formatSeat } from "@/lib/format";
 import { createReservationSchema } from "@/lib/schemas";
+import { LoyaltyBalance } from "@/components/LoyaltyBalance";
 
 type Field = "customerName" | "email";
 type FieldErrors = Partial<Record<Field, string>>;
@@ -146,6 +147,8 @@ export function ReservationForm({
           )}
         </div>
       </div>
+
+      <LoyaltyBalance email={email} />
 
       {formError && (
         <p role="alert" className="alert mt-6">

@@ -424,6 +424,10 @@ Lekcja E04: gdy webhook płatności się opóźnia, UI po 30 sekundach informuje
 
 ## Trello
 
+Odczyt rezerwacji i potwierdzenie mailowe Etapu III: [opis integracji Resend](docs/ticket-confirmation.md).
+`pnpm email:preview` generuje lokalny podgląd fikcyjnego biletu, a `pnpm email:test`
+wysyła go do odbiorcy testowego Resend po skonfigurowaniu `RESEND_API_KEY` i `RESEND_FROM`.
+
 `To Do` → `Doing` → `Review` (otwarty PR) → `Done` (zmergowane)
 
 Karta jest **Done**, gdy kod jest na `main`, testy przechodzą, a checklista w karcie jest odhaczona.

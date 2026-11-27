@@ -55,6 +55,8 @@ async function ReservationDetails({
         expiresAt: 1,
         code: 1,
         amount: 1,
+        // E-mail służy tylko do odczytu salda punktów; nie trafia do URL.
+        email: 1,
       },
     },
   );
@@ -99,6 +101,8 @@ async function ReservationDetails({
           >
             {amount !== null ? (
               <CheckoutButton
+                key={`${id}:${reservation.email}`}
+                email={reservation.email}
                 amount={amount}
                 cancelled={cancelled}
                 reservationId={id}
@@ -125,7 +129,7 @@ async function ReservationDetails({
             </div>
             {amount !== null && (
               <div>
-                <dt className="label text-muted">Do zapłaty</dt>
+                <dt className="label text-muted">Cena biletu</dt>
                 <dd className="mt-1 text-ink numerals">
                   {formatPrice(amount)}
                 </dd>

@@ -1,5 +1,6 @@
 import type { ObjectId } from "mongodb";
 import { z } from "zod";
+import type { EmailOperation } from "./email-state.ts";
 
 // Domyślne komunikaty Zoda po polsku (kontrakt: błędy po polsku).
 z.config(z.locales.pl());
@@ -73,6 +74,8 @@ export const reservationIdSchema = z
 export type Reservation = CreateReservationInput & {
   _id: ObjectId;
   status: "held" | "purchased";
+  // Stan wysyłki maila z biletem (Resend) — karta C, Olek.
+  confirmationEmail?: EmailOperation;
   expiresAt: Date;
   // Cena spektaklu skopiowana w chwili rezerwacji (grosze). Później się nie
   // zmienia, nawet gdy zmieni się cena spektaklu — tyle płaci klient.

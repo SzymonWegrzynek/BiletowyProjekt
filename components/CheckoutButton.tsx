@@ -2,23 +2,33 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CheckoutPoints } from "@/components/CheckoutPoints";
 import { useExpireReservation } from "@/components/ReservationTimer";
 import { Spinner } from "@/components/Spinner";
+import { getPointsPreview } from "@/lib/checkout-points";
 import { formatPrice } from "@/lib/format";
-import { retryPayment } from "@/lib/payment-retry";
+import {
+  loadLoyaltyBalance,
+  loyaltyEmailSchema,
+  type LoyaltyState,
+} from "@/lib/loyalty";
+import { CheckoutError, retryPayment } from "@/lib/payment-retry";
 
 export function CheckoutButton({
   reservationId,
   eventId,
   expiresAt,
   amount,
+  email,
   cancelled = false,
 }: {
   reservationId: string;
   eventId: string;
   expiresAt: string;
   amount: number;
+  // Tylko do odczytu salda punktów (GET /api/loyalty); nie trafia do URL.
+  email: string;
   cancelled?: boolean;
 }) {
   const router = useRouter();
@@ -26,22 +36,53 @@ export function CheckoutButton({
   const [loading, setLoading] = useState(false);
   const [expired, setExpired] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Etap III: wybór punktów. Podgląd dopłaty liczy UI, ale saldo i limit
+  // sprawdza ponownie backend przy checkoucie.
+  const [points, setPoints] = useState("0");
+  const [balance, setBalance] = useState<LoyaltyState>({ status: "loading" });
+  const [balanceAttempt, setBalanceAttempt] = useState(0);
+  const stopBalance = useRef<(() => void) | null>(null);
+  const preview = getPointsPreview(amount, points, balance);
   // W liczniku: wygaśnięcie przełącza cały licznik; poza nim — własny komunikat.
   const expireTimer = useExpireReservation();
 
-  function markExpired() {
+  const markExpired = useCallback(() => {
     if (expireTimer) expireTimer();
     else setExpired(true);
-  }
+  }, [expireTimer]);
+
+  const refreshBalance = useCallback(() => {
+    stopBalance.current?.();
+    setBalance({ status: "loading" });
+    setBalanceAttempt((attempt) => attempt + 1);
+  }, []);
 
   useEffect(() => {
-    const refresh = () => router.refresh();
+    if (!loyaltyEmailSchema.safeParse(email).success) {
+      const timer = setTimeout(() => setBalance({ status: "error" }), 0);
+      return () => clearTimeout(timer);
+    }
+    const stop = loadLoyaltyBalance(email, setBalance);
+    stopBalance.current = stop;
+    return stop;
+  }, [email, balanceAttempt]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (busy.current) return;
+      refreshBalance();
+      router.refresh();
+    };
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
-  }, [router]);
+  }, [router, refreshBalance]);
 
-  async function pay() {
+  const pay = useCallback(async () => {
     if (busy.current || expired) return;
+    if (!preview.valid) {
+      setError(preview.error);
+      return;
+    }
     if (Date.parse(expiresAt) <= Date.now()) {
       markExpired();
       return;
@@ -51,7 +92,11 @@ export function CheckoutButton({
     setError(null);
     let navigating = false;
     try {
-      const result = await retryPayment(reservationId, cancelled);
+      const result = await retryPayment(
+        reservationId,
+        cancelled,
+        preview.points,
+      );
       if (result.kind === "expired") markExpired();
       else if (result.kind === "paid") {
         router.replace(`/bilet/${encodeURIComponent(result.code)}`);
@@ -62,18 +107,29 @@ export function CheckoutButton({
       }
     } catch (error) {
       setError(
-        error instanceof Error &&
-          error.message === "Płatności chwilowo niedostępne, spróbuj za chwilę."
+        error instanceof CheckoutError
           ? error.message
           : "Nie udało się rozpocząć płatności. Spróbuj ponownie za chwilę.",
       );
+      // Odrzucony checkout z punktami — saldo mogło się zmienić.
+      if (error instanceof CheckoutError && preview.points > 0)
+        refreshBalance();
     } finally {
       if (!navigating) {
         busy.current = false;
         setLoading(false);
       }
     }
-  }
+  }, [
+    expired,
+    preview,
+    expiresAt,
+    markExpired,
+    reservationId,
+    cancelled,
+    router,
+    refreshBalance,
+  ]);
 
   if (expired)
     return (
@@ -101,15 +157,30 @@ export function CheckoutButton({
           miejsce.
         </p>
       )}
+      <CheckoutPoints
+        amount={amount}
+        value={points}
+        balance={balance}
+        disabled={loading}
+        onChange={(value) => {
+          setPoints(value);
+          setError(null);
+        }}
+        onRefresh={refreshBalance}
+      />
       <button
         type="button"
         onClick={pay}
-        disabled={loading}
+        disabled={loading || !preview.valid}
         aria-busy={loading}
         className="btn-primary w-full"
       >
         {loading && <Spinner />}
-        {loading ? "Przechodzę do płatności…" : `Zapłać ${formatPrice(amount)}`}
+        {loading
+          ? "Przechodzę do płatności…"
+          : preview.valid
+            ? `Zapłać ${formatPrice(preview.cardAmount)}`
+            : "Popraw liczbę punktów"}
       </button>
       {error && (
         <p role="alert" className="alert">
