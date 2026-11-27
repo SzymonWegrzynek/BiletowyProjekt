@@ -13,6 +13,10 @@ const ERRORS = {
     status: 409,
     message: "Ta rezerwacja jest już opłacona",
   },
+  INSUFFICIENT_POINTS: {
+    status: 409,
+    message: "Masz za mało punktów. Odśwież saldo i wybierz mniej punktów.",
+  },
   RATE_LIMITED: {
     status: 429,
     message: "Za dużo prób rezerwacji. Spróbuj ponownie za chwilę.",

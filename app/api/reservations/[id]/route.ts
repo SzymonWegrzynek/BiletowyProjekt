@@ -6,7 +6,8 @@ import { reservationIdSchema, type ReservationApiStatus } from "@/lib/schemas";
 // Front odpytuje co 2 s po powrocie ze Stripe'a — żadnego cache po drodze.
 const NO_STORE = { "Cache-Control": "no-store" };
 
-// GET /api/reservations/:id → { status, amount, expiresAt, code? }.
+// GET /api/reservations/:id → { status, amount, expiresAt, pointsUsed, code?,
+// pointsEarned?, cardAmount? } — pola punktów z Etapu III tylko dopisujemy.
 // Bez imienia i e-maila: id rezerwacji jest w URL, więc odpowiedź nie może
 // ujawniać danych klienta.
 export async function GET(
@@ -21,7 +22,17 @@ export async function GET(
 
   const reservation = await reservationsCollection().findOne(
     { _id: new ObjectId(parsed.data) },
-    { projection: { status: 1, amount: 1, expiresAt: 1, code: 1 } },
+    {
+      projection: {
+        status: 1,
+        amount: 1,
+        expiresAt: 1,
+        code: 1,
+        pointsUsed: 1,
+        pointsEarned: 1,
+        cardAmount: 1,
+      },
+    },
   );
   if (!reservation) {
     return apiError("NOT_FOUND", "Nie ma takiej rezerwacji", NO_STORE);
@@ -41,9 +52,20 @@ export async function GET(
       status,
       amount: reservation.amount,
       expiresAt: reservation.expiresAt.toISOString(),
-      // Kod biletu tylko przy opłaconej rezerwacji.
+      // Rozliczenie punktów utrwala webhook przy opłaceniu; wcześniej 0.
+      pointsUsed: status === "paid" ? (reservation.pointsUsed ?? 0) : 0,
+      // Kod biletu i nagroda tylko przy opłaconej rezerwacji — zdobyte
+      // punkty przed potwierdzeniem zakupu nie są rozliczeniem.
       ...(status === "paid" && reservation.code
-        ? { code: reservation.code }
+        ? {
+            code: reservation.code,
+            ...(reservation.pointsEarned !== undefined
+              ? { pointsEarned: reservation.pointsEarned }
+              : {}),
+            ...(reservation.cardAmount !== undefined
+              ? { cardAmount: reservation.cardAmount }
+              : {}),
+          }
         : {}),
     },
     { headers: NO_STORE },

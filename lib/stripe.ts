@@ -60,13 +60,17 @@ export function isPaymentUnavailable(error: unknown): boolean {
 // Wygaszenie starej sesji Checkout. Najlepszy wysiłek: sesja mogła już
 // wygasnąć albo zostać opłacona — wtedy Stripe odmówi, a drugą płatność
 // i tak obsługuje webhook (zwrot). Nie przerywamy przez to odpowiedzi.
+// Zwraca true tylko, gdy Stripe potwierdził wygaszenie — wtedy sesji na pewno
+// nie da się już opłacić (np. wolno oddać punkty wydane na tę próbę).
 export async function expireCheckoutSessionQuietly(
   sessionId: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await getStripe().checkout.sessions.expire(sessionId);
+    const session = await getStripe().checkout.sessions.expire(sessionId);
+    return session?.status === "expired";
   } catch (error) {
     console.warn(`Nie udało się wygasić sesji Stripe ${sessionId}`, error);
+    return false;
   }
 }
 
@@ -98,7 +102,10 @@ export type RefundReason =
   | "unknown_reservation"
   // Rezerwacja wygasła bez zapłaty i punkty wydane na nią już wróciły do
   // klienta — spóźniona płatność nie daje biletu ze zniżką, wraca w całości.
-  | "points_released";
+  | "points_released"
+  // Punkty tej próby płatności zostały już oddane klientowi (np. sesja była
+  // uznana za nieopłacalną) — bilet za dopłatę bez punktów byłby za tani.
+  | "points_returned";
 
 // Zwrot całej płatności sesji Checkout. Klient, który zapłacił, dostaje
 // bilet albo zwrot — nigdy nic. Klucz idempotencji = id sesji, więc ponowiony

@@ -97,8 +97,49 @@ export type Reservation = CreateReservationInput & {
   // zapłaty. Od tej chwili webhook nie zamieni jej w bilet, tylko zwróci
   // pieniądze — klient nie dostanie i biletu ze zniżką, i punktów z powrotem.
   pointsReleasedAt?: Date;
+  // Punkty wydane na opłaconą sesję (ustawia webhook razem z `code`;
+  // 0 przy zakupie bez punktów). cardAmount + pointsUsed = amount.
+  pointsUsed?: number;
+  // Próba płatności z punktami powiązana z checkoutSessionId (brak, gdy
+  // ostatnie „Zapłać” było bez punktów).
+  checkoutAttemptId?: string;
   code?: string;
   createdAt: Date;
+};
+
+// Body POST /api/reservations/:id/checkout. Brak body albo brak `points`
+// = zakup bez punktów (zachowanie Etapu II). Kwoty nie przyjmujemy nigdy.
+export const checkoutBodySchema = z.object(
+  {
+    points: z
+      .number({ error: "Liczba punktów musi być liczbą całkowitą" })
+      .int("Liczba punktów musi być liczbą całkowitą")
+      .nonnegative("Liczba punktów nie może być ujemna")
+      .max(Number.MAX_SAFE_INTEGER, "Za duża liczba punktów")
+      .optional(),
+  },
+  { error: "Wyślij { points } albo puste body" },
+);
+export type CheckoutBody = z.infer<typeof checkoutBodySchema>;
+
+// Próba płatności z punktami: punkty schodzą z karty przed utworzeniem sesji
+// Stripe, więc każda próba musi skończyć się zapłatą albo zwrotem punktów.
+// _id = attempt w operacjach redeem:/return:<reservationId>:<attempt>.
+// spending → (open | returning | failed); open → (paid | returning);
+// paid → returning (tylko gdy płatność wróciła klientowi); returning → returned.
+export type CheckoutAttempt = {
+  _id: string;
+  reservationId: string;
+  email: string; // znormalizowany
+  points: number; // > 0
+  cardAmount: number; // amount - points, grosze
+  status: "spending" | "open" | "paid" | "returning" | "returned" | "failed";
+  sessionId?: string;
+  // Dlaczego punkty wracają (do diagnostyki).
+  returnReason?: string;
+  lastError?: string;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 // E-mail klienta programu lojalnościowego: ten sam format co w rezerwacji,
