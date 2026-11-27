@@ -24,7 +24,15 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     // Testy wołają handlery bez IP, więc wszystkie dzielą jeden licznik
-    // limitu — podnosimy go; sam limit sprawdza tests/rate-limit.test.ts.
-    env: { MONGODB_DB: testDb, RESERVATION_RATE_LIMIT: "100000" },
+    // limitu — podnosimy go; sam limit sprawdzają tests/rate-limit.test.ts
+    // i tests/loyalty-limit.test.ts. Kopię salda wyłączamy, żeby testy
+    // widziały każdą zmianę w atrapie Voucherify od razu (kopię sprawdza
+    // tests/loyalty-limit.test.ts).
+    env: {
+      MONGODB_DB: testDb,
+      RESERVATION_RATE_LIMIT: "100000",
+      LOYALTY_RATE_LIMIT: "100000",
+      LOYALTY_BALANCE_CACHE_SECONDS: "0",
+    },
   },
 });

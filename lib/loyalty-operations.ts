@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { MongoServerError } from "mongodb";
-import { loyaltyOperationsCollection } from "./db.ts";
+import {
+  loyaltyAccountsCollection,
+  loyaltyOperationsCollection,
+} from "./db.ts";
 import type { LoyaltyOperation } from "./schemas.ts";
 import {
   LoyaltyUnavailableError,
@@ -37,6 +40,16 @@ export type LoyaltyOperationResult =
   | { status: "in_progress" }
   // Voucherify ją odrzucił (np. za mało punktów) — nie ponawiamy.
   | { status: "failed"; error?: string };
+
+// Saldo klienta mogło się zmienić — kopia salda w bazie jest nieaktualna.
+// $inc wersji sprawia, że odczyt rozpoczęty przed zmianą nie zapisze już
+// starego salda (zapisuje tylko przy niezmienionej wersji).
+async function invalidateCachedBalance(email: string): Promise<void> {
+  await loyaltyAccountsCollection().updateOne(
+    { _id: email },
+    { $inc: { balanceVersion: 1 }, $unset: { balance: "", balanceAt: "" } },
+  );
+}
 
 // Status po nieudanej próbie: czy wolno ją po prostu ponowić.
 function statusAfterError(
@@ -184,6 +197,10 @@ export async function applyLoyaltyOperation(
         $unset: { leaseToken: "", leaseUntil: "" },
       },
     );
+    // Timeout / 5xx: zmiana mogła przejść, więc kopia salda też jest niepewna.
+    await invalidateCachedBalance(before.email).catch((invalidateError) =>
+      console.error(`Nie unieważniono salda ${before.email}`, invalidateError),
+    );
     throw error;
   }
 
@@ -200,6 +217,7 @@ export async function applyLoyaltyOperation(
       $unset: { leaseToken: "", leaseUntil: "", lastError: "" },
     },
   );
+  await invalidateCachedBalance(before.email);
   return { status: "done", appliedNow, balanceAfter };
 }
 

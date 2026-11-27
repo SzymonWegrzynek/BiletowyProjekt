@@ -111,7 +111,7 @@ Każdy błąd zwracaj przez `apiError()` z `lib/errors.ts`. Nigdy nie zwracaj 50
 ## Zasady systemu (invarianty)
 
 1. Jedno miejsce na spektaklu = najwyżej jedna aktywna rezerwacja albo bilet.
-2. Bilet powstaje tylko z ważnej rezerwacji (`status: "held"` i `expiresAt > now`). Wyjątek — webhook: opłacona sesja daje bilet, dopóki dokument `held` **istnieje**, także po `expiresAt` (unikalny indeks gwarantuje, że nikt inny nie ma tego miejsca). Dokumentu już nie ma → zwrot.
+2. Bilet powstaje tylko z ważnej rezerwacji (`status: "held"` i `expiresAt > now`). Wyjątek — webhook: opłacona sesja daje bilet, dopóki dokument `held` **istnieje**, także po `expiresAt` (unikalny indeks gwarantuje, że nikt inny nie ma tego miejsca). Dokumentu już nie ma albo ma `pointsReleasedAt` (punkty wydane na rezerwację wróciły do klienta) → zwrot.
 3. Jedna rezerwacja = jeden bilet (jeden kod).
 4. Wygasła rezerwacja nie blokuje miejsca.
 5. Czas ważności liczy serwer (`new Date()` po stronie API), nigdy klient.
@@ -235,7 +235,8 @@ Ponowny zakup tej samej rezerwacji **zwraca ten sam kod**, nie tworzy drugiego b
 - Webhook (`app/api/webhooks/stripe/route.ts`): surowe body `request.text()` → `constructWebhookEvent()` (zły / brak podpisu → 400, brak `STRIPE_WEBHOOK_SECRET` → 503). Inne zdarzenia i `payment_status !== "paid"` → 200 bez zmian. Opłacona sesja → jeden warunkowy zapis `{ _id, status: "held" }` (bez `expiresAt`) → `purchased` + `code` + `paidAt` + `paidSessionId`. Gdy zapis nie trafił:
   - `purchased` z tym samym `paidSessionId` → 200 bez zmian (ponowienie, ten sam kod)
   - `purchased` z inną sesją → zwrot (`duplicate_payment`)
-  - brak dokumentu (miejsce przejęte po wygaśnięciu) albo sesja bez id rezerwacji → zwrot (`reservation_gone` / `unknown_reservation`)
+  - brak dokumentu (miejsce przejęte po wygaśnięciu) albo sesja bez id rezerwacji → zwrot (`reservation_gone` / `unknown_reservation`) i zwrot punktów wydanych na tę rezerwację
+  - `held` z `pointsReleasedAt` (wygasła, punkty już wróciły) → zwrot (`points_released`); filtr zapisu biletu ma `pointsReleasedAt: { $exists: false }`, więc wyścig „zwrot punktów” vs „spóźniona płatność” rozstrzyga baza
 - Zwroty tylko przez `refundPayment()` z `lib/stripe.ts`: klucz idempotencji `refund-<sessionId>`, więc ponowiony webhook nie oddaje pieniędzy drugi raz. Błąd bazy albo zwrotu → 500, żeby Stripe ponowił.
 - Klient Stripe tylko z `getStripe()` w `lib/stripe.ts` (timeout 8 s, 1 ponowienie). Awaria Stripe'a albo brak `STRIPE_SECRET_KEY` / `APP_URL` → **503 `PAYMENT_UNAVAILABLE`** + `Retry-After`, szczegóły tylko w logach. Rezerwacja zostaje `held`.
 - `APP_URL` z env, nigdy z nagłówka `Host`.

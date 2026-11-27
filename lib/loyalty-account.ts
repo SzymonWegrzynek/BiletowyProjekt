@@ -18,6 +18,20 @@ export const LOYALTY_WELCOME_BONUS = 1000;
 
 export const welcomeBonusOperationId = (email: string) => `bonus:${email}`;
 
+// Jak długo odczyt salda może pochodzić z kopii w bazie zamiast z Voucherify.
+// Zmiany robione przez aplikację (bonus, nagroda, potrącenie, zwrot) od razu
+// unieważniają kopię, więc opóźnienie dotyczy tylko zmian w innych kanałach.
+// 0 = zawsze pytaj Voucherify.
+export function getBalanceCacheMs(): number {
+  const seconds = Number(process.env.LOYALTY_BALANCE_CACHE_SECONDS ?? 15);
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    throw new Error(
+      "LOYALTY_BALANCE_CACHE_SECONDS musi być nieujemną liczbą sekund",
+    );
+  }
+  return seconds * 1000;
+}
+
 // Jak długo jedno wywołanie „trzyma” dołączanie klienta do programu.
 const JOIN_LEASE_MS = 15_000;
 
@@ -111,8 +125,45 @@ export async function ensureLoyaltyCard(email: string): Promise<string> {
   return saved;
 }
 
+// Saldo z Voucherify albo z kopii młodszej niż getBalanceCacheMs().
+// Kopia jest tylko oszczędnością zapytań — źródłem prawdy zostaje Voucherify
+// (płatność punktami zawsze sprawdza saldo w Voucherify, nie w kopii).
+async function readBalance(email: string, cardCode: string): Promise<number> {
+  const accounts = loyaltyAccountsCollection();
+  const cacheMs = getBalanceCacheMs();
+  const account = await accounts.findOne(
+    { _id: email },
+    { projection: { balance: 1, balanceAt: 1, balanceVersion: 1 } },
+  );
+  if (
+    cacheMs > 0 &&
+    account?.balance !== undefined &&
+    account.balanceAt &&
+    Date.now() - account.balanceAt.getTime() < cacheMs
+  ) {
+    return account.balance;
+  }
+
+  const { balance } = await getLoyaltyCard(cardCode);
+  if (cacheMs > 0) {
+    // Warunkowy zapis: gdy w trakcie odczytu aplikacja zmieniła saldo
+    // (wersja wzrosła), odczytane saldo może być sprzed zmiany — nie zapisujemy.
+    const version = account?.balanceVersion;
+    await accounts.updateOne(
+      {
+        _id: email,
+        // Konto bez żadnej zmiany salda nie ma jeszcze pola wersji.
+        balanceVersion: version === undefined ? { $exists: false } : version,
+      },
+      { $set: { balance, balanceAt: new Date() } },
+    );
+  }
+  return balance;
+}
+
 // Aktualne saldo klienta. Nowemu klientowi najpierw przyznaje bonus — raz,
-// bo bonus to operacja o stałym id. Saldo zawsze z Voucherify, nie z bazy.
+// bo bonus to operacja o stałym id. Saldo z Voucherify (lub jego świeżej
+// kopii), nigdy wyliczane z naszej bazy.
 export async function getLoyaltyBalance(email: string): Promise<number> {
   const cardCode = await ensureLoyaltyCard(email);
   const bonusId = welcomeBonusOperationId(email);
@@ -150,5 +201,5 @@ export async function getLoyaltyBalance(email: string): Promise<number> {
     return bonus.balanceAfter;
   }
 
-  return (await getLoyaltyCard(cardCode)).balance;
+  return readBalance(email, cardCode);
 }

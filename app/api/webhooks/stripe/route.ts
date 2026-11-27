@@ -6,6 +6,7 @@ import {
   awardPurchasePoints,
   purchaseRewardFields,
 } from "@/lib/loyalty-rewards";
+import { releaseSpendsForReservation } from "@/lib/loyalty-spend";
 import { reservationIdSchema } from "@/lib/schemas";
 import {
   PAYMENT_RETRY_AFTER_SECONDS,
@@ -98,13 +99,16 @@ async function handlePaidSession(
 
   // Jeden warunkowy zapis, jak zakup w Etapie I. Filtr celowo BEZ expiresAt:
   // dopóki dokument "held" istnieje, nikt inny nie ma tego miejsca (unikalny
-  // indeks { eventId, seatId }), więc spóźniona płatność daje bilet.
+  // indeks { eventId, seatId }), więc spóźniona płatność daje bilet —
+  // chyba że punkty wydane na tę rezerwację już wróciły do klienta
+  // (pointsReleasedAt, lib/loyalty-spend.ts). Ten sam warunek w zapisie
+  // rozstrzyga wyścig ze zwrotem punktów.
   // Drugi raz filtr już nie pasuje — ponowiony webhook niczego nie zmienia.
   // E11000 może tu dać tylko kolizja kodu → losujemy nowy.
   for (let attempt = 1; attempt <= MAX_CODE_ATTEMPTS; attempt++) {
     try {
       const updated = await reservations.findOneAndUpdate(
-        { _id, status: "held" },
+        { _id, status: "held", pointsReleasedAt: { $exists: false } },
         {
           $set: {
             status: "purchased",
@@ -134,7 +138,7 @@ async function handlePaidSession(
   // Status "purchased" nie wraca do "held", więc tu nie ma wyścigu.
   const existing = await reservations.findOne(
     { _id },
-    { projection: { status: 1, paidSessionId: 1 } },
+    { projection: { status: 1, paidSessionId: 1, pointsReleasedAt: 1 } },
   );
 
   // Ta sama sesja drugi raz (ponowienie Stripe'a) — bilet już jest.
@@ -152,14 +156,38 @@ async function handlePaidSession(
 
   if (!existing) {
     // Rezerwacja wygasła, a miejsce przejął ktoś inny (POST /api/reservations
-    // usuwa wygasłą "held") — biletu nie będzie, więc zwrot.
+    // usuwa wygasłą "held") — biletu nie będzie, więc zwrot pieniędzy
+    // i punktów wydanych na tę rezerwację.
     await refund(session, reservationId, "reservation_gone");
+    await returnSpentPointsQuietly(reservationId);
+    return;
+  }
+
+  if (existing.pointsReleasedAt) {
+    // Rezerwacja wygasła, a punkty wydane na nią już wróciły do klienta —
+    // spóźniona płatność wraca w całości (pieniądze i punkty, bez biletu).
+    await refund(session, reservationId, "points_released");
+    await returnSpentPointsQuietly(reservationId);
     return;
   }
 
   // "held", a zapis nie trafił — nie powinno się zdarzyć. Rzucamy, żeby
   // Stripe ponowił zamiast zgubić płatność.
   throw new Error(`Rezerwacja ${reservationId} w nieoczekiwanym stanie`);
+}
+
+// Pieniądze już wracają, więc webhook odpowiada 2xx także przy awarii
+// Voucherify — punkty dokończy odczyt salda klienta (GET /api/loyalty)
+// albo pnpm loyalty:pending --finish.
+async function returnSpentPointsQuietly(reservationId: string): Promise<void> {
+  try {
+    await releaseSpendsForReservation(reservationId);
+  } catch (error) {
+    console.error(
+      `Punkty z rezerwacji ${reservationId} czekają na zwrot`,
+      error,
+    );
+  }
 }
 
 async function refund(

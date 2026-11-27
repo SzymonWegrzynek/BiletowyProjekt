@@ -93,6 +93,10 @@ export type Reservation = CreateReservationInput & {
   cardAmount?: number;
   pointsEarned?: number;
   pointsEarnedStatus?: "pending" | "done";
+  // Punkty wydane na tę rezerwację wróciły do klienta, bo wygasła bez
+  // zapłaty. Od tej chwili webhook nie zamieni jej w bilet, tylko zwróci
+  // pieniądze — klient nie dostanie i biletu ze zniżką, i punktów z powrotem.
+  pointsReleasedAt?: Date;
   code?: string;
   createdAt: Date;
 };
@@ -104,12 +108,20 @@ export const loyaltyEmailSchema = createReservationSchema.shape.email.transform(
 );
 
 // Powiązanie e-maila z kartą lojalnościową w Voucherify. Saldo trzyma
-// wyłącznie Voucherify — tu jest tylko kod karty.
+// wyłącznie Voucherify — tu jest kod karty i krótka kopia ostatniego odczytu.
 export type LoyaltyAccount = {
   _id: string; // znormalizowany e-mail
   cardCode?: string;
   createdAt: Date;
   joinedAt?: Date;
+  // Ostatnie saldo odczytane z Voucherify (cache na kilkanaście sekund,
+  // żeby odpytywanie salda w pętli nie zużyło limitu zapytań Voucherify).
+  balance?: number;
+  balanceAt?: Date;
+  // Rośnie przy każdej zmianie salda przez aplikację. Odczyt zapisuje cache
+  // tylko wtedy, gdy wersja się nie zmieniła — saldo sprzed zmiany nie
+  // nadpisze unieważnienia.
+  balanceVersion?: number;
   // Dołączanie do programu w toku (równoległe pierwsze odczyty czekają).
   joinLeaseUntil?: Date;
   // Wydawanie punktów w toku — najwyżej jedno naraz na klienta, żeby dwie
@@ -139,6 +151,10 @@ export type LoyaltyOperation = {
   leaseUntil?: Date;
   balanceAfter?: number;
   lastError?: string;
+  // Tylko potrącenia (redeem:): punkty już wróciły do klienta (return:)
+  // albo rezerwacja została opłacona i punkty zostają wydane.
+  returnedAt?: Date;
+  keptAt?: Date;
   createdAt: Date;
   updatedAt: Date;
   doneAt?: Date;

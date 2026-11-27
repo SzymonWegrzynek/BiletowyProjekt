@@ -342,11 +342,11 @@ Dowolna przyszła data ważności, dowolny CVC i kod pocztowy.
 
 ## Punkty lojalnościowe (Etap III)
 
-Saldo punktów trzyma **Voucherify** (kampania lojalnościowa, klient identyfikowany e-mailem) — to jedyne źródło prawdy, bo klient może zbierać punkty także w innych kanałach. Nasza baza trzyma tylko powiązanie e-mail → karta (`loyaltyAccounts`) i rejestr zmian salda (`loyaltyOperations`). Adapter: `lib/voucherify.ts` (zwykły `fetch`, timeout 5 s, klucze tylko na serwerze).
+Saldo punktów trzyma **Voucherify** (kampania lojalnościowa, klient identyfikowany e-mailem) — to jedyne źródło prawdy, bo klient może zbierać punkty także w innych kanałach. Nasza baza trzyma powiązanie e-mail → karta z krótką kopią ostatniego salda (`loyaltyAccounts`) i rejestr zmian salda (`loyaltyOperations`). Adapter: `lib/voucherify.ts` (zwykły `fetch`, timeout 5 s, klucze tylko na serwerze).
 
-| Endpoint                   | Co robi                                                                           |
-| -------------------------- | --------------------------------------------------------------------------------- |
-| `GET /api/loyalty?email=…` | `{ email, points }`; nowy klient dostaje 1000 punktów; 400 zły e-mail; 503 awaria |
+| Endpoint                   | Co robi                                                                                      |
+| -------------------------- | -------------------------------------------------------------------------------------------- |
+| `GET /api/loyalty?email=…` | `{ email, points }`; nowy klient dostaje 1000 punktów; 400 zły e-mail; 429 limit; 503 awaria |
 
 - E-mail normalizujemy (`trim` + małe litery), więc `Jan@X.pl` i `jan@x.pl` to jedno konto.
 - Bonus 1000 punktów to operacja o stałym id `bonus:<email>` w `loyaltyOperations`: powstaje raz (unikalne `_id`), a wykonuje ją tylko ten, kto warunkowym zapisem zmieni `pending` → `applying`. Kolejne odczyty nie przyznają go drugi raz.
@@ -363,6 +363,9 @@ Lekcja E04: awaria programu lojalnościowego nie może dać fałszywego salda an
 
 - **Timeouty i limit:** każde zapytanie ma timeout 5 s. Odczyt (saldo, historia karty) ponawiamy raz po krótkiej przerwie albo po krótkim `Retry-After`. Zmian salda nie ponawiamy w adapterze nigdy, bo ich wynik rozstrzyga rejestr operacji. Po `429` nie pytamy Voucherify, dopóki limit nie minie (`Retry-After` / `X-Rate-Limit-Retry`, domyślnie 30 s), żeby go nie przedłużać.
 - **Saldo:** błąd odczytu → `503 LOYALTY_UNAVAILABLE`, nigdy `0` ani nowy bonus. Bez potwierdzonego salda płatność punktami nie rusza.
+- **Zalew odczytów salda (III.A3):** `GET /api/loyalty` ma własny limit na IP — `LOYALTY_RATE_LIMIT` (domyślnie 10) odczytów w oknie 10 s, licznik w bazie jak przy rezerwacjach (`takeLoyaltySlot` w `lib/rate-limit.ts`). Ponad limit → `429 RATE_LIMITED` z `Retry-After`. Do tego saldo ma krótką kopię w `loyaltyAccounts` (`LOYALTY_BALANCE_CACHE_SECONDS`, domyślnie 15 s), więc klient odpytujący saldo w pętli nie zużyje limitu Voucherify innym klientom. Każda zmiana salda przez aplikację od razu unieważnia kopię (`balanceVersion` + warunkowy zapis odczytu), a płatność punktami zawsze sprawdza saldo w samym Voucherify.
+- **Bez harmonogramu (III.A2, III.B3, III.B4):** Vercel Cron na darmowym planie działa raz dziennie, więc zaległe rozliczenia klienta dokańcza `GET /api/loyalty` tuż przed odczytem salda (`settleCustomerLoyalty`, najwyżej 3 pozycje): nagrodę za zakup po awarii Voucherify i zwrot punktów wydanych na rezerwację, która wygasła albo zniknęła. Gdy nic nie zalega, to tylko kilka odczytów z bazy. Błąd przy dokańczaniu nie blokuje odczytu salda.
+- **Zwrot punktów z nieopłaconej rezerwacji** (`releaseSpendIfUnused` w `lib/loyalty-spend.ts`): wykonane potrącenie `redeem:<rezerwacja>:<próba>` wraca, gdy rezerwacji nie ma (miejsce przejął ktoś inny) albo wygasła. Wygasłą `held` najpierw oznaczamy warunkowym zapisem `pointsReleasedAt`, a webhook zamienia w bilet tylko `held` bez tego znacznika. Dlatego spóźniona płatność kończy się albo biletem (punkty zostają wydane), albo zwrotem pieniędzy (`points_released`) i punktów. Nigdy nie ma i biletu ze zniżką, i punktów z powrotem. Webhook, który zwraca pieniądze (`reservation_gone`, `points_released`), od razu oddaje też punkty. Potrącenie opłaconej rezerwacji dostaje `keptAt` i nie jest więcej sprawdzane. Checkout z punktami musi wykonać potrącenie **przed** utworzeniem sesji Stripe (sesja jest na `amount - points`).
 - **Bilet ważniejszy od punktów:** awaria przy nagrodzie po zapłacie zostawia bilet i `pointsEarnedStatus: "pending"`.
 
 **Jak znaleźć i dokończyć zaległe operacje:**
@@ -374,7 +377,7 @@ pnpm loyalty:pending --finish --email=jan@example.com
 ```
 
 - Dokańczanie jest bezpieczne, bo każda operacja ma stałe id i wykonuje się najwyżej raz. Operacje `unknown` są rozstrzygane po historii karty dopiero 60 s po niepewnej próbie.
-- Skrypt dokańcza tylko dopisania (`bonus:`, `earn:`) i zwroty (`return:`). Niedokończonych potrąceń (`redeem:`) nie wykonuje, bo zabrałyby punkty za płatność, której klient mógł nie dokończyć. Rozstrzyga je ścieżka płatności (`returnSpentPoints`).
+- Skrypt dokańcza dopisania (`bonus:`, `earn:`) i zwroty (`return:`), a wykonane potrącenia z wygasłych albo przejętych rezerwacji zwraca. Niedokończonych potrąceń (`redeem:`) nie wykonuje, bo zabrałyby punkty za płatność, której klient mógł nie dokończyć. Rozstrzyga je ścieżka płatności (`returnSpentPoints`).
 - Na limicie zapytań skrypt przerywa pracę. Uruchom go ponownie po czasie z komunikatu.
 - Operacje `failed` (odrzucone przez Voucherify) wymagają ręcznego sprawdzenia w panelu Voucherify.
 
