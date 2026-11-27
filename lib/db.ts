@@ -68,6 +68,8 @@ export async function ensureIndexes(): Promise<void> {
   );
   // Zaległe rozliczenia punktów (pnpm loyalty:pending): szukamy po stanie.
   await loyaltyOperationsCollection().createIndex({ status: 1, updatedAt: 1 });
+  // Dokańczanie przy odczycie salda: operacje jednego klienta.
+  await loyaltyOperationsCollection().createIndex({ email: 1, status: 1 });
   await reservations.createIndex(
     { pointsEarnedStatus: 1, paidAt: 1 },
     { partialFilterExpression: { pointsEarnedStatus: "pending" } },

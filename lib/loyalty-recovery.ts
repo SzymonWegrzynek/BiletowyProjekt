@@ -1,6 +1,7 @@
 import { loyaltyOperationsCollection, reservationsCollection } from "./db.ts";
 import { applyLoyaltyOperation } from "./loyalty-operations.ts";
 import { settlePurchaseReward } from "./loyalty-rewards.ts";
+import { findUnreturnedSpends, releaseSpendIfUnused } from "./loyalty-spend.ts";
 import { LoyaltyUnavailableError } from "./voucherify.ts";
 
 // Zaległe rozliczenia punktów po awarii Voucherify: nagrody za opłacone bilety
@@ -10,7 +11,8 @@ import { LoyaltyUnavailableError } from "./voucherify.ts";
 // Operacje, które wolno dokończyć bez udziału klienta: dopisanie punktów
 // (bonus, nagroda) i zwrot wydanych. Potrącenia (redeem:) NIE — potrącenie
 // dokończone po fakcie zabrałoby punkty za płatność, której klient mógł nie
-// dokończyć. Rozstrzyga je ścieżka płatności (returnSpentPoints).
+// dokończyć. Wykonane potrącenia z rezerwacji, która wygasła albo zniknęła,
+// zwracamy (releaseSpendIfUnused).
 const AUTO_FINISH = /^(bonus|earn|return):/;
 
 const UNFINISHED = ["pending", "applying", "unknown"] as const;
@@ -88,7 +90,7 @@ export async function listPendingLoyaltyWork({
 }
 
 export type FinishReport = {
-  finished: number; // rozliczone teraz
+  finished: number; // rozliczone teraz (także zwroty punktów)
   waiting: number; // w toku albo jeszcze nie do rozstrzygnięcia
   errors: number; // Voucherify nadal nie odpowiada / odrzucił
   stoppedByLimit: boolean; // przerwane, żeby nie przedłużać limitu zapytań
@@ -96,6 +98,8 @@ export type FinishReport = {
 
 // Dokańcza zaległe rozliczenia, najwyżej `limit` pozycji na uruchomienie
 // (Sandbox ma 100 wywołań API na godzinę). Na limicie zapytań przerywa.
+// Kolejność: nagrody za bilety, zwroty punktów z nieopłaconych rezerwacji,
+// pozostałe niedokończone operacje (bonus, nagroda, zwrot).
 export async function finishPendingLoyaltyWork({
   limit = 20,
   email,
@@ -142,6 +146,26 @@ export async function finishPendingLoyaltyWork({
     }
   }
 
+  // Punkty wydane na rezerwację, która wygasła albo zniknęła — wracają.
+  const spends = await findUnreturnedSpends({
+    email,
+    limit: Math.max(budget, 0),
+  });
+  for (const spendId of spends) {
+    if (report.stoppedByLimit || budget <= 0) break;
+    try {
+      const result = await releaseSpendIfUnused(spendId);
+      if (result === "kept") continue; // rezerwacja ważna albo opłacona
+      budget -= 1;
+      if (result === "returned" || result === "cancelled") {
+        report.finished += 1;
+      }
+    } catch (error) {
+      budget -= 1;
+      onError(error);
+    }
+  }
+
   const operations = await loyaltyOperationsCollection()
     .find({
       status: { $in: [...UNFINISHED] },
@@ -171,4 +195,20 @@ export async function finishPendingLoyaltyWork({
   }
 
   return report;
+}
+
+// Zaległe rozliczenia jednego klienta, dokańczane przy odczycie jego salda
+// (GET /api/loyalty). Zastępuje harmonogram: Vercel Cron na darmowym planie
+// działa raz dziennie, a punkty za zakup i zwrot punktów z wygasłej
+// rezerwacji mają być widoczne w ciągu kilkunastu sekund. Gdy nic nie
+// zalega, to tylko kilka odczytów z bazy — bez zapytań do Voucherify.
+// Błędy tylko w logach: saldo i tak odczytamy (albo odpowiemy 503).
+export const SETTLE_ON_READ_LIMIT = 3;
+
+export async function settleCustomerLoyalty(email: string): Promise<void> {
+  try {
+    await finishPendingLoyaltyWork({ email, limit: SETTLE_ON_READ_LIMIT });
+  } catch (error) {
+    console.error(`Nie dokończono rozliczeń punktów ${email}`, error);
+  }
 }
