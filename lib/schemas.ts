@@ -104,12 +104,20 @@ export const loyaltyEmailSchema = createReservationSchema.shape.email.transform(
 );
 
 // Powiązanie e-maila z kartą lojalnościową w Voucherify. Saldo trzyma
-// wyłącznie Voucherify — tu jest tylko kod karty.
+// wyłącznie Voucherify — tu jest kod karty i krótka kopia ostatniego odczytu.
 export type LoyaltyAccount = {
   _id: string; // znormalizowany e-mail
   cardCode?: string;
   createdAt: Date;
   joinedAt?: Date;
+  // Ostatnie saldo odczytane z Voucherify (cache na kilkanaście sekund,
+  // żeby odpytywanie salda w pętli nie zużyło limitu zapytań Voucherify).
+  balance?: number;
+  balanceAt?: Date;
+  // Rośnie przy każdej zmianie salda przez aplikację. Odczyt zapisuje cache
+  // tylko wtedy, gdy wersja się nie zmieniła — saldo sprzed zmiany nie
+  // nadpisze unieważnienia.
+  balanceVersion?: number;
   // Dołączanie do programu w toku (równoległe pierwsze odczyty czekają).
   joinLeaseUntil?: Date;
   // Wydawanie punktów w toku — najwyżej jedno naraz na klienta, żeby dwie

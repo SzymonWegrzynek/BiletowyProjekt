@@ -1,5 +1,6 @@
 import { apiError } from "@/lib/errors";
 import { getLoyaltyBalance } from "@/lib/loyalty-account";
+import { clientIp, takeLoyaltySlot } from "@/lib/rate-limit";
 import { loyaltyEmailSchema } from "@/lib/schemas";
 import {
   LOYALTY_RETRY_AFTER_SECONDS,
@@ -7,11 +8,12 @@ import {
   VoucherifyRequestError,
 } from "@/lib/voucherify";
 
-// Saldo zmienia się także poza aplikacją — żadnego cache po drodze.
+// Saldo zmienia się także poza aplikacją — żadnego cache HTTP po drodze.
 const NO_STORE = { "Cache-Control": "no-store" };
 
 // GET /api/loyalty?email=… → { email, points }. Nowy klient dostaje
-// 1000 punktów. Awaria Voucherify daje 503, nigdy saldo 0.
+// 1000 punktów. Awaria Voucherify daje 503, nigdy saldo 0. Za dużo odczytów
+// z jednego IP → 429 z Retry-After (limit chroni limit zapytań Voucherify).
 export async function GET(request: Request) {
   const parsed = loyaltyEmailSchema.safeParse(
     new URL(request.url).searchParams.get("email") ?? undefined,
@@ -24,6 +26,16 @@ export async function GET(request: Request) {
     );
   }
   const email = parsed.data;
+
+  // Po walidacji, przed pierwszym zapytaniem do Voucherify — jak w rezerwacji.
+  const retryAfter = await takeLoyaltySlot(clientIp(request), new Date());
+  if (retryAfter !== null) {
+    return apiError(
+      "RATE_LIMITED",
+      "Za dużo zapytań o saldo punktów. Spróbuj ponownie za chwilę.",
+      { ...NO_STORE, "Retry-After": String(retryAfter) },
+    );
+  }
 
   try {
     const points = await getLoyaltyBalance(email);
