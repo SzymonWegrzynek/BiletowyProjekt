@@ -1,5 +1,11 @@
 import { MongoClient, type Db } from "mongodb";
-import type { Event, RateLimitWindow, Reservation } from "./schemas.ts";
+import type {
+  Event,
+  LoyaltyAccount,
+  LoyaltyOperation,
+  RateLimitWindow,
+  Reservation,
+} from "./schemas.ts";
 
 // Jeden klient na proces: hot reload w dev nie może otwierać nowych połączeń.
 const globalForMongo = globalThis as typeof globalThis & {
@@ -43,6 +49,14 @@ export function rateLimitsCollection() {
   return getDb().collection<RateLimitWindow>("rateLimits");
 }
 
+export function loyaltyAccountsCollection() {
+  return getDb().collection<LoyaltyAccount>("loyaltyAccounts");
+}
+
+export function loyaltyOperationsCollection() {
+  return getDb().collection<LoyaltyOperation>("loyaltyOperations");
+}
+
 // Indeksy pilnują invariantów: jedno miejsce = jeden dokument, jeden kod = jeden bilet.
 // createIndex jest idempotentne. Wołają to `pnpm db:setup` i testy.
 export async function ensureIndexes(): Promise<void> {
@@ -51,6 +65,12 @@ export async function ensureIndexes(): Promise<void> {
   await reservations.createIndex(
     { code: 1 },
     { unique: true, partialFilterExpression: { code: { $exists: true } } },
+  );
+  // Zaległe rozliczenia punktów (pnpm loyalty:pending): szukamy po stanie.
+  await loyaltyOperationsCollection().createIndex({ status: 1, updatedAt: 1 });
+  await reservations.createIndex(
+    { pointsEarnedStatus: 1, paidAt: 1 },
+    { partialFilterExpression: { pointsEarnedStatus: "pending" } },
   );
   // Liczniki limitu sprząta TTL po końcu okna; limit działa i bez tego indeksu.
   await rateLimitsCollection().createIndex(

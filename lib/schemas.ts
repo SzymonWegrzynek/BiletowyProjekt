@@ -86,8 +86,62 @@ export type Reservation = CreateReservationInput & {
   // ponowiony webhook tej samej sesji od drugiej płatności (→ zwrot).
   // checkoutSessionId nie wystarcza — nadpisuje go każde nowe „Zapłać”.
   paidSessionId?: string;
+  // Rozliczenie punktów po opłaceniu (ustawia webhook razem z `code`).
+  // cardAmount = kwota faktycznie zapłacona kartą w opłaconej sesji (grosze),
+  // pointsEarned = nagroda od tej kwoty. pointsEarnedStatus: "pending" dopóki
+  // Voucherify nie potwierdzi dopisania punktów, potem "done".
+  cardAmount?: number;
+  pointsEarned?: number;
+  pointsEarnedStatus?: "pending" | "done";
   code?: string;
   createdAt: Date;
+};
+
+// E-mail klienta programu lojalnościowego: ten sam format co w rezerwacji,
+// małymi literami — „Jan@X.pl” i „jan@x.pl” to jedno konto punktowe.
+export const loyaltyEmailSchema = createReservationSchema.shape.email.transform(
+  (email) => email.toLowerCase(),
+);
+
+// Powiązanie e-maila z kartą lojalnościową w Voucherify. Saldo trzyma
+// wyłącznie Voucherify — tu jest tylko kod karty.
+export type LoyaltyAccount = {
+  _id: string; // znormalizowany e-mail
+  cardCode?: string;
+  createdAt: Date;
+  joinedAt?: Date;
+  // Dołączanie do programu w toku (równoległe pierwsze odczyty czekają).
+  joinLeaseUntil?: Date;
+  // Wydawanie punktów w toku — najwyżej jedno naraz na klienta, żeby dwie
+  // rezerwacje nie wydały razem więcej, niż jest na karcie.
+  spendLockToken?: string;
+  spendLockUntil?: Date;
+};
+
+// Jedna zmiana salda w Voucherify (bonus, nagroda, potrącenie) ze stabilnym
+// identyfikatorem. Unikalne _id gwarantuje, że operacja istnieje raz;
+// status mówi, czy już się wykonała.
+export type LoyaltyOperation = {
+  _id: string; // np. "bonus:<email>", "earn:<reservationId>"
+  email: string;
+  cardCode: string;
+  points: number; // > 0 dodanie, < 0 potrącenie
+  reason: string;
+  // pending: czeka na wykonanie (na pewno nie wykonana);
+  // applying: ktoś ją właśnie wykonuje (lease);
+  // unknown: ostatnia próba bez odpowiedzi (timeout, 5xx) — mogła się wykonać,
+  //   przed ponowieniem trzeba sprawdzić historię karty;
+  // done: Voucherify potwierdził zmianę;
+  // failed: Voucherify ją odrzucił (np. za mało punktów) — bez ponowień.
+  status: "pending" | "applying" | "unknown" | "done" | "failed";
+  attempts: number;
+  leaseToken?: string;
+  leaseUntil?: Date;
+  balanceAfter?: number;
+  lastError?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  doneAt?: Date;
 };
 
 // Status rezerwacji w API (GET /api/reservations/:id). W bazie zostaje

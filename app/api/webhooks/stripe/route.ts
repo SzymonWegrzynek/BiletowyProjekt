@@ -2,6 +2,10 @@ import { MongoServerError, ObjectId } from "mongodb";
 import type Stripe from "stripe";
 import { reservationsCollection } from "@/lib/db";
 import { apiError } from "@/lib/errors";
+import {
+  awardPurchasePoints,
+  purchaseRewardFields,
+} from "@/lib/loyalty-rewards";
 import { reservationIdSchema } from "@/lib/schemas";
 import {
   PAYMENT_RETRY_AFTER_SECONDS,
@@ -81,6 +85,17 @@ async function handlePaidSession(
   const reservations = reservationsCollection();
   const paidAt = new Date();
 
+  // Nagroda od kwoty faktycznie zapłaconej kartą w TEJ sesji (z podpisanego
+  // zdarzenia) — część opłacona punktami jej nie daje.
+  const cardAmount = session.amount_total;
+  const reward =
+    typeof cardAmount === "number" && Number.isSafeInteger(cardAmount)
+      ? purchaseRewardFields(cardAmount)
+      : undefined;
+  if (!reward) {
+    console.error(`Sesja ${session.id} bez amount_total — bez nagrody`);
+  }
+
   // Jeden warunkowy zapis, jak zakup w Etapie I. Filtr celowo BEZ expiresAt:
   // dopóki dokument "held" istnieje, nikt inny nie ma tego miejsca (unikalny
   // indeks { eventId, seatId }), więc spóźniona płatność daje bilet.
@@ -96,11 +111,17 @@ async function handlePaidSession(
             code: generateTicketCode(),
             paidAt,
             paidSessionId: session.id,
+            ...reward,
           },
         },
         { returnDocument: "after", projection: { _id: 1 } },
       );
-      if (updated) return;
+      if (updated) {
+        // Bilet już jest. Punkty dopisujemy po nim — awaria Voucherify
+        // zostawia nagrodę "pending", ale nie zabiera biletu.
+        await awardPurchasePoints(_id);
+        return;
+      }
       break;
     } catch (error) {
       const codeCollision =
@@ -118,7 +139,12 @@ async function handlePaidSession(
 
   // Ta sama sesja drugi raz (ponowienie Stripe'a) — bilet już jest.
   if (existing?.status === "purchased") {
-    if (existing.paidSessionId === session.id) return;
+    if (existing.paidSessionId === session.id) {
+      // Ponowienie — przy okazji dokańczamy nagrodę, jeśli poprzednio
+      // Voucherify nie odpowiedział (operacja wykona się najwyżej raz).
+      await awardPurchasePoints(_id);
+      return;
+    }
     // Opłacona inną sesją (dwie karty, podwójny klik) — druga płatność wraca.
     await refund(session, reservationId, "duplicate_payment");
     return;
