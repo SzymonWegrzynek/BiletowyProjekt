@@ -21,6 +21,8 @@ export function createFakeVoucherify() {
     join: [] as Failure[],
     get: [] as Failure[],
     adjust: [] as Failure[],
+    adjustAfterApply: [] as Failure[],
+    has: [] as Failure[],
   };
 
   // Mała przerwa, żeby równoległe wywołania naprawdę się przeplatały.
@@ -68,7 +70,24 @@ export function createFakeVoucherify() {
       const balance = card(code).balance + points;
       balances.set(code, balance);
       transactions.push({ cardCode: code, points, sourceId, reason });
+      // Zmiana się wykonała, ale odpowiedź nie dotarła (timeout po fakcie).
+      const lost = failures.adjustAfterApply.shift();
+      if (lost) throw lost({ points, sourceId });
       return { balance };
+    },
+
+    async has(code: string, sourceId: string): Promise<boolean> {
+      await tick();
+      const failure = failures.has.shift();
+      if (failure) throw failure({ sourceId });
+      return transactions.some(
+        (t) => t.cardCode === code && t.sourceId === sourceId,
+      );
+    },
+
+    balanceOf(email: string): number | undefined {
+      const code = cardsByEmail.get(email);
+      return code === undefined ? undefined : balances.get(code);
     },
 
     cardOf(email: string): string | undefined {

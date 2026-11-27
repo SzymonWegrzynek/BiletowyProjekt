@@ -206,3 +206,50 @@ export async function adjustLoyaltyBalance(
   const parsed = balanceSchema.safeParse(data);
   return parsed.success ? { balance: parsed.data.balance } : {};
 }
+
+const transactionsPageSchema = z.object({
+  data: z.array(z.object({ id: z.string(), source_id: z.string().nullish() })),
+  has_more: z.boolean().optional(),
+  more_starting_after: z.string().nullish(),
+});
+
+// Ile stron historii karty (po 100 transakcji) przeglądamy, szukając
+// własnej operacji. Szukamy od najnowszych, a niepewna operacja jest świeża.
+const TRANSACTION_PAGES = 5;
+
+// Czy na karcie jest już transakcja z naszym source_id (= id operacji).
+// Tak rozstrzygamy operację po timeoucie: czy Voucherify ją wykonał, zanim
+// spróbujemy drugi raz. Filtr API nie obejmuje source_id — przeglądamy listę.
+export async function hasLoyaltyTransaction(
+  cardCode: string,
+  sourceId: string,
+): Promise<boolean> {
+  let startingAfter: string | undefined;
+  for (let page = 0; page < TRANSACTION_PAGES; page++) {
+    const query = new URLSearchParams({ limit: "100", order: "-id" });
+    if (startingAfter) query.set("starting_after_id", startingAfter);
+    const data = await request(
+      "GET",
+      (campaignId) =>
+        `/v1/loyalties/${campaignId}/members/${encodeURIComponent(cardCode)}/transactions?${query}`,
+    );
+    const parsed = transactionsPageSchema.safeParse(data);
+    if (!parsed.success) {
+      throw new LoyaltyUnavailableError(
+        "Voucherify zwrócił nieoczekiwaną listę transakcji",
+        "unknown",
+      );
+    }
+    if (parsed.data.data.some((t) => t.source_id === sourceId)) return true;
+    if (!parsed.data.has_more || !parsed.data.more_starting_after) {
+      return false;
+    }
+    startingAfter = parsed.data.more_starting_after;
+  }
+  // Historia dłuższa niż przeglądamy — nie zgadujemy, operacja zostaje
+  // nierozstrzygnięta do ręcznego sprawdzenia.
+  throw new LoyaltyUnavailableError(
+    `Nie znaleziono ${sourceId} w ${TRANSACTION_PAGES} stronach historii karty`,
+    "unknown",
+  );
+}

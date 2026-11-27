@@ -1,13 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { MongoServerError } from "mongodb";
 import { loyaltyOperationsCollection } from "./db.ts";
-import { adjustLoyaltyBalance } from "./voucherify.ts";
+import type { LoyaltyOperation } from "./schemas.ts";
+import {
+  LoyaltyUnavailableError,
+  VoucherifyRequestError,
+  adjustLoyaltyBalance,
+  hasLoyaltyTransaction,
+} from "./voucherify.ts";
 
 const DUPLICATE_KEY = 11000;
 
 // Jak długo jedna próba „trzyma” operację. Dłużej niż timeout Voucherify,
 // żeby nikt nie przejął operacji, która jeszcze czeka na odpowiedź.
 export const LOYALTY_OPERATION_LEASE_MS = 30_000;
+
+// Po ilu ms od niepewnej próby wolno ją rozstrzygać. Zmiana salda w
+// Voucherify jest asynchroniczna — transakcja może pojawić się na liście
+// z opóźnieniem, a wcześniejsze „nie ma jej” prowadziłoby do podwójnej zmiany.
+export const LOYALTY_RECONCILE_DELAY_MS = 60_000;
 
 export type LoyaltyOperationInput = {
   id: string; // stabilny identyfikator, np. "bonus:<email>"
@@ -21,15 +32,39 @@ export type LoyaltyOperationResult =
   // Zmiana salda jest w Voucherify. appliedNow = wykonało ją to wywołanie
   // (wtedy balanceAfter to saldo zaraz po zmianie, jeśli Voucherify je podał).
   | { status: "done"; appliedNow: boolean; balanceAfter?: number }
-  // Inne wywołanie właśnie ją wykonuje — nie powtarzamy.
-  | { status: "in_progress" };
+  // Inne wywołanie właśnie ją wykonuje albo czeka na rozstrzygnięcie
+  // niepewnej próby — nie powtarzamy w ciemno.
+  | { status: "in_progress" }
+  // Voucherify ją odrzucił (np. za mało punktów) — nie ponawiamy.
+  | { status: "failed"; error?: string };
+
+// Status po nieudanej próbie: czy wolno ją po prostu ponowić.
+function statusAfterError(
+  error: unknown,
+  reconciling: boolean,
+): LoyaltyOperation["status"] {
+  // Wynik poprzedniej próby był nieznany i nadal jest.
+  if (reconciling) return "unknown";
+  if (error instanceof VoucherifyRequestError) return "failed";
+  if (
+    error instanceof LoyaltyUnavailableError &&
+    error.outcome === "not_applied"
+  ) {
+    return "pending";
+  }
+  // Timeout, 5xx, nieoczekiwany błąd: zmiana mogła się wykonać.
+  return "unknown";
+}
 
 // Wykonuje zmianę salda w Voucherify najwyżej raz dla danego id.
 // Voucherify nie ma kluczy idempotencji, więc pilnuje tego baza:
 // 1. operacja powstaje raz (unikalne _id, $setOnInsert),
 // 2. wykonuje ją tylko ten, kto warunkowym zapisem ją „zajmie”
-//    (pending → applying z lease), więc równoległe wywołania się nie dublują,
-// 3. dopiero potwierdzenie z Voucherify zmienia status na done.
+//    (→ applying z lease), więc równoległe wywołania się nie dublują,
+// 3. niepewna próba (timeout, 5xx, proces padł) dostaje status unknown;
+//    przed kolejną sprawdzamy w historii karty, czy transakcja z naszym
+//    source_id już jest — zamiast powtarzać zmianę salda w ciemno,
+// 4. dopiero potwierdzenie z Voucherify zmienia status na done.
 // Dane operacji (karta, punkty) zawsze z bazy — ponowienie nie może ich zmienić.
 export async function applyLoyaltyOperation(
   input: LoyaltyOperationInput,
@@ -40,9 +75,12 @@ export async function applyLoyaltyOperation(
   // Skrót: najczęstszy przypadek (bonus dawno przyznany) bez zapisów.
   const known = await operations.findOne(
     { _id: input.id },
-    { projection: { status: 1 } },
+    { projection: { status: 1, lastError: 1 } },
   );
   if (known?.status === "done") return { status: "done", appliedNow: false };
+  if (known?.status === "failed") {
+    return { status: "failed", error: known.lastError };
+  }
 
   if (!known) {
     try {
@@ -74,13 +112,20 @@ export async function applyLoyaltyOperation(
   }
 
   const leaseToken = randomUUID();
-  const claimed = await operations.findOneAndUpdate(
+  const before = await operations.findOneAndUpdate(
     {
       _id: input.id,
       $or: [
         { status: "pending" },
-        // Poprzednia próba utknęła (np. proces padł) — lease minął.
+        // Poprzednia próba utknęła (np. proces padł w trakcie) — lease minął.
         { status: "applying", leaseUntil: { $lte: now } },
+        // Niepewna próba, odczekana tyle, że jej transakcja byłaby widoczna.
+        {
+          status: "unknown",
+          updatedAt: {
+            $lte: new Date(now.getTime() - LOYALTY_RECONCILE_DELAY_MS),
+          },
+        },
       ],
     },
     {
@@ -92,34 +137,47 @@ export async function applyLoyaltyOperation(
       },
       $inc: { attempts: 1 },
     },
-    { returnDocument: "after" },
+    // "before": potrzebny poprzedni status — czy wynik ostatniej próby był znany.
+    { returnDocument: "before" },
   );
 
-  if (!claimed) {
+  if (!before) {
     const current = await operations.findOne(
       { _id: input.id },
-      { projection: { status: 1 } },
+      { projection: { status: 1, lastError: 1 } },
     );
     if (current?.status === "done") {
       return { status: "done", appliedNow: false };
     }
+    if (current?.status === "failed") {
+      return { status: "failed", error: current.lastError };
+    }
     return { status: "in_progress" };
   }
 
+  const reconciling = before.status !== "pending";
   let balanceAfter: number | undefined;
+  let appliedNow = true;
   try {
-    ({ balance: balanceAfter } = await adjustLoyaltyBalance(
-      claimed.cardCode,
-      claimed.points,
-      { sourceId: claimed._id, reason: claimed.reason },
-    ));
+    if (
+      reconciling &&
+      (await hasLoyaltyTransaction(before.cardCode, before._id))
+    ) {
+      // Poprzednia próba jednak się wykonała — nie powtarzamy.
+      appliedNow = false;
+    } else {
+      ({ balance: balanceAfter } = await adjustLoyaltyBalance(
+        before.cardCode,
+        before.points,
+        { sourceId: before._id, reason: before.reason },
+      ));
+    }
   } catch (error) {
-    // Zwalniamy operację z powrotem do pending, żeby dało się ją dokończyć.
     await operations.updateOne(
-      { _id: claimed._id, leaseToken },
+      { _id: before._id, leaseToken },
       {
         $set: {
-          status: "pending",
+          status: statusAfterError(error, reconciling),
           lastError: String(error),
           updatedAt: new Date(),
         },
@@ -131,7 +189,7 @@ export async function applyLoyaltyOperation(
 
   const doneAt = new Date();
   await operations.updateOne(
-    { _id: claimed._id, leaseToken },
+    { _id: before._id, leaseToken },
     {
       $set: {
         status: "done",
@@ -142,5 +200,16 @@ export async function applyLoyaltyOperation(
       $unset: { leaseToken: "", leaseUntil: "", lastError: "" },
     },
   );
-  return { status: "done", appliedNow: true, balanceAfter };
+  return { status: "done", appliedNow, balanceAfter };
+}
+
+// Stan operacji (np. do czekania na równoległe wywołanie).
+export async function getLoyaltyOperationStatus(
+  id: string,
+): Promise<LoyaltyOperation["status"] | undefined> {
+  const operation = await loyaltyOperationsCollection().findOne(
+    { _id: id },
+    { projection: { status: 1 } },
+  );
+  return operation?.status;
 }

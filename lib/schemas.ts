@@ -110,6 +110,12 @@ export type LoyaltyAccount = {
   cardCode?: string;
   createdAt: Date;
   joinedAt?: Date;
+  // Dołączanie do programu w toku (równoległe pierwsze odczyty czekają).
+  joinLeaseUntil?: Date;
+  // Wydawanie punktów w toku — najwyżej jedno naraz na klienta, żeby dwie
+  // rezerwacje nie wydały razem więcej, niż jest na karcie.
+  spendLockToken?: string;
+  spendLockUntil?: Date;
 };
 
 // Jedna zmiana salda w Voucherify (bonus, nagroda, potrącenie) ze stabilnym
@@ -121,9 +127,13 @@ export type LoyaltyOperation = {
   cardCode: string;
   points: number; // > 0 dodanie, < 0 potrącenie
   reason: string;
-  // pending: czeka na wykonanie; applying: ktoś ją właśnie wykonuje (lease);
-  // done: Voucherify potwierdził zmianę.
-  status: "pending" | "applying" | "done";
+  // pending: czeka na wykonanie (na pewno nie wykonana);
+  // applying: ktoś ją właśnie wykonuje (lease);
+  // unknown: ostatnia próba bez odpowiedzi (timeout, 5xx) — mogła się wykonać,
+  //   przed ponowieniem trzeba sprawdzić historię karty;
+  // done: Voucherify potwierdził zmianę;
+  // failed: Voucherify ją odrzucił (np. za mało punktów) — bez ponowień.
+  status: "pending" | "applying" | "unknown" | "done" | "failed";
   attempts: number;
   leaseToken?: string;
   leaseUntil?: Date;

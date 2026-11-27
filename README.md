@@ -122,12 +122,12 @@ Baza jest **wspólna, w chmurze (Atlas)** — nie trzeba niczego instalować lok
 
 ## Baza danych
 
-| Kolekcja            | Pola                                                                                                                 |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `events`            | `_id`, `title`, `date`, `time`, `stage`                                                                              |
-| `reservations`      | `_id`, `eventId`, `seatId`, `customerName`, `email`, `status` (`held` / `purchased`), `expiresAt`, `code`            |
-| `loyaltyAccounts`   | `_id` (e-mail), `cardCode`, `createdAt`, `joinedAt`                                                                  |
-| `loyaltyOperations` | `_id` (id operacji), `email`, `cardCode`, `points`, `reason`, `status` (`pending` / `applying` / `done`), `attempts` |
+| Kolekcja            | Pola                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `events`            | `_id`, `title`, `date`, `time`, `stage`                                                                                                     |
+| `reservations`      | `_id`, `eventId`, `seatId`, `customerName`, `email`, `status` (`held` / `purchased`), `expiresAt`, `code`                                   |
+| `loyaltyAccounts`   | `_id` (e-mail), `cardCode`, `createdAt`, `joinedAt`                                                                                         |
+| `loyaltyOperations` | `_id` (id operacji), `email`, `cardCode`, `points`, `reason`, `status` (`pending` / `applying` / `unknown` / `done` / `failed`), `attempts` |
 
 **Indeksy** (tworzone przez `pnpm db:setup`):
 
@@ -353,6 +353,8 @@ Saldo punktów trzyma **Voucherify** (kampania lojalnościowa, klient identyfiko
 - Voucherify nie ma kluczy idempotencji, dlatego każda zmiana salda ma `source_id` = id naszej operacji.
 - Awaria Voucherify (timeout, limit, 5xx, brak kluczy) → `503 LOYALTY_UNAVAILABLE` z `Retry-After`. Nigdy nie pokazujemy salda 0 zamiast błędu.
 - **Punkty za zakup:** webhook Stripe w tym samym warunkowym zapisie `held` → `purchased` zapisuje `cardAmount` (kwota zapłacona kartą w opłaconej sesji, `amount_total` z podpisanego zdarzenia) i `pointsEarned = floor(cardAmount / 100) * 10`. Punkty od części opłaconej punktami się nie należą. Potem dopisuje je w Voucherify jako operację `earn:<reservationId>` (najwyżej raz) i ustawia `pointsEarnedStatus: "done"`. Awaria Voucherify nie zabiera biletu: nagroda zostaje `pending`, a ponowiony webhook ją dokańcza.
+- **Ponowienia i równoległość:** każda zmiana salda (bonus, nagroda, potrącenie, zwrot) to operacja w `loyaltyOperations` ze stałym id, wykonywana najwyżej raz. Stany: `pending` (na pewno nie wykonana) → `applying` (ktoś ją wykonuje, lease 30 s) → `done`. Timeout albo 5xx daje `unknown`: zmiana mogła przejść, więc nie powtarzamy jej w ciemno. Po 60 s (zmiany salda w Voucherify są asynchroniczne) sprawdzamy historię karty po `source_id` i dopiero wtedy kończymy albo wykonujemy. Odrzucona przez Voucherify → `failed`.
+- **Wydawanie punktów** (`lib/loyalty-spend.ts`, dla checkoutu z punktami): `spendLoyaltyPoints({ email, reservationId, attempt, points })` — operacja `redeem:<reservationId>:<attempt>`, więc powtórzony checkout potrąca raz. Wydawanie jednego klienta idzie po kolei (blokada na koncie), a saldo z Voucherify jest sprawdzane tuż przed potrąceniem. Saldo może się zmienić także poza aplikacją: gdy po potrąceniu wyjdzie ujemne, punkty wracają, a klient dostaje odmowę (`InsufficientPointsError`). `returnSpentPoints({ reservationId, attempt })` oddaje punkty po nieukończonej płatności albo anuluje potrącenie, które jeszcze się nie wykonało.
 - Testy zawsze na atrapie (`tests/fixtures/fake-voucherify.ts`) — Sandbox ma limit 100 wywołań API na godzinę.
 
 ## Hosting

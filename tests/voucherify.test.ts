@@ -4,6 +4,7 @@ import {
   VoucherifyRequestError,
   adjustLoyaltyBalance,
   getLoyaltyCard,
+  hasLoyaltyTransaction,
   joinLoyaltyProgram,
 } from "@/lib/voucherify";
 
@@ -148,5 +149,47 @@ describe("adapter Voucherify", () => {
     await expect(getLoyaltyCard("LC-ABC")).rejects.toBeInstanceOf(
       LoyaltyUnavailableError,
     );
+  });
+
+  describe("szukanie własnej transakcji po source_id", () => {
+    const page = (ids: (string | null)[], more?: string) =>
+      json(200, {
+        object: "list",
+        data: ids.map((sourceId, i) => ({
+          id: `tx_${i}`,
+          source_id: sourceId,
+        })),
+        has_more: Boolean(more),
+        more_starting_after: more ?? null,
+      });
+
+    it("transakcja na drugiej stronie → true, stronicowanie od najnowszych", async () => {
+      fetchMock
+        .mockResolvedValueOnce(page(["bonus:a", null], "tx_1"))
+        .mockResolvedValueOnce(page(["earn:abc"]));
+      await expect(hasLoyaltyTransaction("LC-ABC", "earn:abc")).resolves.toBe(
+        true,
+      );
+      const [first, second] = fetchMock.mock.calls.map(([url]) => new URL(url));
+      expect(first.pathname).toBe(
+        "/v1/loyalties/camp_1/members/LC-ABC/transactions",
+      );
+      expect(first.searchParams.get("order")).toBe("-id");
+      expect(second.searchParams.get("starting_after_id")).toBe("tx_1");
+    });
+
+    it("brak transakcji i koniec historii → false", async () => {
+      fetchMock.mockResolvedValueOnce(page(["bonus:a"]));
+      await expect(hasLoyaltyTransaction("LC-ABC", "earn:abc")).resolves.toBe(
+        false,
+      );
+    });
+
+    it("historia dłuższa niż przeglądamy → niedostępne, nie zgadujemy", async () => {
+      fetchMock.mockImplementation(async () => page(["inne"], "tx_0"));
+      await expect(
+        hasLoyaltyTransaction("LC-ABC", "earn:abc"),
+      ).rejects.toBeInstanceOf(LoyaltyUnavailableError);
+    });
   });
 });

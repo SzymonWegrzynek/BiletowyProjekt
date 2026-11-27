@@ -60,7 +60,9 @@ export async function awardPurchasePoints(
       points: reservation.pointsEarned,
       reason: `Nagroda za bilet (rezerwacja ${reservationId})`,
     });
-    if (result.status === "in_progress") return "pending";
+    // W toku / do rozstrzygnięcia / odrzucona: nagroda zostaje "pending",
+    // żeby było widać, że wymaga dokończenia.
+    if (result.status !== "done") return "pending";
   } catch (error) {
     if (
       error instanceof LoyaltyUnavailableError ||

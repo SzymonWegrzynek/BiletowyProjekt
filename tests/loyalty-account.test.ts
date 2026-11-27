@@ -157,9 +157,13 @@ describe.skipIf(!process.env.MONGODB_URI)("GET /api/loyalty", () => {
     const res = await getBalance(email);
     expect(res.status).toBe(503);
     expect(res.headers.get("Retry-After")).toBe("30");
-    expect(
-      await loyaltyAccountsCollection().findOne({ _id: email }),
-    ).toBeNull();
+    const account = await loyaltyAccountsCollection().findOne({ _id: email });
+    expect(account?.cardCode).toBeUndefined();
+    // Dołączanie zwolnione — następny odczyt może spróbować od razu.
+    expect(account?.joinLeaseUntil).toBeUndefined();
+
+    const retried = await getBalance(email);
+    expect(await retried.json()).toEqual({ email, points: 1000 });
   });
 
   it("bonus nie przeszedł → 503; następny odczyt go dokańcza, raz", async () => {
