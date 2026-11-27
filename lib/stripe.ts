@@ -95,7 +95,10 @@ export type RefundReason =
   // Rezerwacja jest już opłacona inną sesją Checkout.
   | "duplicate_payment"
   // Sesja bez poprawnego id rezerwacji (nie z naszego /checkout).
-  | "unknown_reservation";
+  | "unknown_reservation"
+  // Rezerwacja wygasła bez zapłaty i punkty wydane na nią już wróciły do
+  // klienta — spóźniona płatność nie daje biletu ze zniżką, wraca w całości.
+  | "points_released";
 
 // Zwrot całej płatności sesji Checkout. Klient, który zapłacił, dostaje
 // bilet albo zwrot — nigdy nic. Klucz idempotencji = id sesji, więc ponowiony

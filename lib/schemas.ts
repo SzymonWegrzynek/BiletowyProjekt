@@ -93,6 +93,10 @@ export type Reservation = CreateReservationInput & {
   cardAmount?: number;
   pointsEarned?: number;
   pointsEarnedStatus?: "pending" | "done";
+  // Punkty wydane na tę rezerwację wróciły do klienta, bo wygasła bez
+  // zapłaty. Od tej chwili webhook nie zamieni jej w bilet, tylko zwróci
+  // pieniądze — klient nie dostanie i biletu ze zniżką, i punktów z powrotem.
+  pointsReleasedAt?: Date;
   code?: string;
   createdAt: Date;
 };
@@ -147,6 +151,10 @@ export type LoyaltyOperation = {
   leaseUntil?: Date;
   balanceAfter?: number;
   lastError?: string;
+  // Tylko potrącenia (redeem:): punkty już wróciły do klienta (return:)
+  // albo rezerwacja została opłacona i punkty zostają wydane.
+  returnedAt?: Date;
+  keptAt?: Date;
   createdAt: Date;
   updatedAt: Date;
   doneAt?: Date;

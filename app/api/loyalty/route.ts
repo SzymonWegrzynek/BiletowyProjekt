@@ -1,5 +1,6 @@
 import { apiError } from "@/lib/errors";
 import { getLoyaltyBalance } from "@/lib/loyalty-account";
+import { settleCustomerLoyalty } from "@/lib/loyalty-recovery";
 import { clientIp, takeLoyaltySlot } from "@/lib/rate-limit";
 import { loyaltyEmailSchema } from "@/lib/schemas";
 import {
@@ -36,6 +37,11 @@ export async function GET(request: Request) {
       { ...NO_STORE, "Retry-After": String(retryAfter) },
     );
   }
+
+  // Najpierw zaległe rozliczenia tego klienta (nagroda za zakup po awarii
+  // Voucherify, zwrot punktów z wygasłej rezerwacji) — bez harmonogramu,
+  // więc saldo od razu je uwzględnia. Błędy tylko w logach.
+  await settleCustomerLoyalty(email);
 
   try {
     const points = await getLoyaltyBalance(email);

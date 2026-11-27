@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { ObjectId } from "mongodb";
 import {
   loyaltyAccountsCollection,
   loyaltyOperationsCollection,
+  reservationsCollection,
 } from "./db.ts";
 import { ensureLoyaltyCard } from "./loyalty-account.ts";
 import {
@@ -184,5 +186,155 @@ export async function returnSpentPoints({
   if (result.status === "failed") {
     throw new SpendRejectedError(result.error ?? `Zwrot ${id} odrzucony`);
   }
+  // Znacznik na potrąceniu: zwrot zrobiony, nie trzeba go więcej szukać.
+  await operations.updateOne(
+    { _id: id, returnedAt: { $exists: false } },
+    { $set: { returnedAt: new Date() } },
+  );
   return "returned";
+}
+
+// --- Punkty z rezerwacji, która nie zostanie opłacona -----------------------
+//
+// Vercel Cron na darmowym planie działa raz dziennie, a punkty mają wrócić
+// najpóźniej 15 s po wygaśnięciu rezerwacji. Dlatego zwrot robi ten, kto
+// pierwszy zapyta: GET /api/loyalty klienta, webhook spóźnionej płatności
+// albo skrypt pnpm loyalty:pending --finish. Każde z nich jest bezpieczne
+// do powtarzania (zwrot to operacja return:… wykonywana raz).
+
+const SPEND_PREFIX = "redeem:";
+const RESERVATION_ID = /^[0-9a-f]{24}$/i;
+
+export function parseSpendOperationId(
+  id: string,
+): { reservationId: string; attempt: string } | undefined {
+  if (!id.startsWith(SPEND_PREFIX)) return undefined;
+  const rest = id.slice(SPEND_PREFIX.length);
+  const separator = rest.indexOf(":");
+  if (separator <= 0 || separator === rest.length - 1) return undefined;
+  return {
+    reservationId: rest.slice(0, separator),
+    attempt: rest.slice(separator + 1),
+  };
+}
+
+// Potrącenia, które mogą wymagać zwrotu: wykonane (done) i jeszcze nie
+// zwrócone albo czekające (pending — wtedy zwrot je anuluje).
+// applying / unknown pomijamy: nie wiadomo, czy punkty zeszły z karty —
+// rozstrzyga je ścieżka płatności, a lista jest w pnpm loyalty:pending.
+export async function findUnreturnedSpends({
+  email,
+  reservationId,
+  limit = 20,
+}: {
+  email?: string | RegExp;
+  reservationId?: string;
+  limit?: number;
+}): Promise<string[]> {
+  const prefix = reservationId
+    ? `^${SPEND_PREFIX}${reservationId}:`
+    : `^${SPEND_PREFIX}`;
+  const spends = await loyaltyOperationsCollection()
+    .find(
+      {
+        _id: { $regex: prefix },
+        status: { $in: ["done", "pending"] },
+        returnedAt: { $exists: false },
+        keptAt: { $exists: false },
+        ...(email === undefined ? {} : { email }),
+      },
+      { projection: { _id: 1 } },
+    )
+    .sort({ updatedAt: 1 })
+    .limit(limit)
+    .toArray();
+  return spends.map((spend) => spend._id);
+}
+
+// Czy punkty wydane na rezerwację wolno już oddać:
+// - rezerwacji nie ma (wygasła, a miejsce przejął ktoś inny) → tak,
+// - wygasła "held" → tak, ale najpierw warunkowy zapis pointsReleasedAt.
+//   Webhook zamienia w bilet tylko "held" BEZ tego znacznika, więc wyścig
+//   „zwrot punktów” vs „spóźniona płatność” rozstrzyga baza: albo bilet
+//   (i punkty zostają wydane), albo zwrot punktów i zwrot pieniędzy,
+// - "purchased" → nie, punkty zostają wydane ("paid"),
+// - ważna "held" → jeszcze nie ("valid").
+export type SpendReleaseDecision = "release" | "paid" | "valid";
+
+export async function claimSpendRelease(
+  reservationId: string,
+  now = new Date(),
+): Promise<SpendReleaseDecision> {
+  // Id spoza naszych rezerwacji — nie zgadujemy, nic nie oddajemy.
+  if (!RESERVATION_ID.test(reservationId)) return "valid";
+  const _id = new ObjectId(reservationId);
+  const reservations = reservationsCollection();
+
+  const marked = await reservations.updateOne(
+    {
+      _id,
+      status: "held",
+      expiresAt: { $lte: now },
+      pointsReleasedAt: { $exists: false },
+    },
+    { $set: { pointsReleasedAt: now } },
+  );
+  if (marked.modifiedCount === 1) return "release";
+
+  // Zapis nic nie zmienił — odczyt tylko po to, żeby wybrać gałąź.
+  // Znacznik ani "purchased" nie znikają, więc tu nie ma wyścigu.
+  const current = await reservations.findOne(
+    { _id },
+    { projection: { status: 1, pointsReleasedAt: 1 } },
+  );
+  if (!current) return "release";
+  if (current.status === "purchased") return "paid";
+  return current.pointsReleasedAt === undefined ? "valid" : "release";
+}
+
+// Zwrot punktów z jednego potrącenia, jeśli jego rezerwacja nie zostanie
+// opłacona. Wynik "kept" = rezerwacja wciąż ważna albo opłacona.
+export async function releaseSpendIfUnused(
+  spendId: string,
+  now = new Date(),
+): Promise<ReturnResult | "kept"> {
+  const parsed = parseSpendOperationId(spendId);
+  if (!parsed) return "nothing";
+  const decision = await claimSpendRelease(parsed.reservationId, now);
+  if (decision === "valid") return "kept";
+  if (decision === "paid") {
+    const operations = loyaltyOperationsCollection();
+    // Potrącenie, które się nie wykonało, a rezerwacja jest już opłacona
+    // (inną próbą płatności) — nie może wykonać się później.
+    const cancelled = await operations.updateOne(
+      { _id: spendId, status: "pending" },
+      {
+        $set: {
+          status: "failed",
+          lastError: "Anulowane — rezerwacja opłacona inną próbą płatności",
+          updatedAt: new Date(),
+        },
+      },
+    );
+    if (cancelled.modifiedCount === 1) return "cancelled";
+    // Wykonane potrącenie opłaconego biletu zostaje; nie szukamy go więcej.
+    // (Zwrot punktów z zastąpionej próby płatności robi ścieżka checkoutu
+    // przez returnSpentPoints — znacznik mu nie przeszkadza.)
+    await operations.updateOne(
+      { _id: spendId, status: "done" },
+      { $set: { keptAt: new Date() } },
+    );
+    return "kept";
+  }
+  return returnSpentPoints(parsed);
+}
+
+// Wszystkie potrącenia jednej rezerwacji (np. z webhooka, który właśnie
+// zwrócił pieniądze za spóźnioną płatność).
+export async function releaseSpendsForReservation(
+  reservationId: string,
+): Promise<void> {
+  for (const spendId of await findUnreturnedSpends({ reservationId })) {
+    await releaseSpendIfUnused(spendId);
+  }
 }
