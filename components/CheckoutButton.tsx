@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { retryPayment } from "@/lib/payment-retry";
+import { useExpireReservation } from "@/components/ReservationTimer";
+import { Spinner } from "@/components/Spinner";
 import { formatPrice } from "@/lib/format";
+import { retryPayment } from "@/lib/payment-retry";
 
 export function CheckoutButton({
   reservationId,
@@ -24,6 +26,13 @@ export function CheckoutButton({
   const [loading, setLoading] = useState(false);
   const [expired, setExpired] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // W liczniku: wygaśnięcie przełącza cały licznik; poza nim — własny komunikat.
+  const expireTimer = useExpireReservation();
+
+  function markExpired() {
+    if (expireTimer) expireTimer();
+    else setExpired(true);
+  }
 
   useEffect(() => {
     const refresh = () => router.refresh();
@@ -34,7 +43,7 @@ export function CheckoutButton({
   async function pay() {
     if (busy.current || expired) return;
     if (Date.parse(expiresAt) <= Date.now()) {
-      setExpired(true);
+      markExpired();
       return;
     }
     busy.current = true;
@@ -43,7 +52,7 @@ export function CheckoutButton({
     let navigating = false;
     try {
       const result = await retryPayment(reservationId, cancelled);
-      if (result.kind === "expired") setExpired(true);
+      if (result.kind === "expired") markExpired();
       else if (result.kind === "paid") {
         router.replace(`/bilet/${encodeURIComponent(result.code)}`);
         navigating = true;
@@ -68,10 +77,12 @@ export function CheckoutButton({
 
   if (expired)
     return (
-      <div role="alert" className="flex flex-col gap-2">
-        <p>Rezerwacja wygasła, miejsce wróciło do puli</p>
+      <div role="alert" className="flex flex-col items-center gap-6">
+        <p className="alert w-full text-center">
+          Rezerwacja wygasła, miejsce wróciło do puli
+        </p>
         <Link
-          className="underline"
+          className="btn-secondary"
           href={`/spektakl/${encodeURIComponent(eventId)}`}
         >
           Wróć do widowni
@@ -82,7 +93,10 @@ export function CheckoutButton({
   return (
     <>
       {cancelled && (
-        <p role="status">
+        <p
+          role="status"
+          className="rounded-2xl border border-gold/30 bg-gold-soft px-4 py-3 text-sm text-ink"
+        >
           Płatność przerwana. Możesz spróbować ponownie, dopóki trzymamy Twoje
           miejsce.
         </p>
@@ -92,12 +106,13 @@ export function CheckoutButton({
         onClick={pay}
         disabled={loading}
         aria-busy={loading}
-        className="rounded bg-gray-900 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+        className="btn-primary w-full"
       >
+        {loading && <Spinner />}
         {loading ? "Przechodzę do płatności…" : `Zapłać ${formatPrice(amount)}`}
       </button>
       {error && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="alert">
           {error}
         </p>
       )}

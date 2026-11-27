@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatCountdown, formatSeat, formatPrice } from "@/lib/format";
+import {
+  formatCountdown,
+  formatEventDate,
+  formatPrice,
+  formatSeat,
+} from "@/lib/format";
 
 describe("formatPrice", () => {
   it.each([
@@ -40,5 +45,21 @@ describe("formatCountdown", () => {
     [-5_000, "00:00"],
   ])("%i ms → %s", (ms, expected) => {
     expect(formatCountdown(ms)).toBe(expected);
+  });
+});
+
+describe("formatEventDate", () => {
+  it("rozbija datę na polskie części w dopełniaczu", () => {
+    expect(formatEventDate("2026-11-14")).toEqual({
+      weekday: "sobota",
+      day: "14",
+      month: "listopada",
+      year: "2026",
+      long: "sobota, 14 listopada 2026",
+    });
+  });
+
+  it("zwraca null dla niepoprawnej daty", () => {
+    expect(formatEventDate("jutro")).toBeNull();
   });
 });

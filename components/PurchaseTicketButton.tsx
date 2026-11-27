@@ -1,88 +1,67 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useExpireReservation } from "@/components/ReservationTimer";
+import { Spinner } from "@/components/Spinner";
+
+const EXPIRED_MESSAGE = "Rezerwacja wygasła, miejsce wróciło do puli";
+const GENERIC_MESSAGE = "Nie udało się kupić biletu. Spróbuj ponownie.";
 
 type Props = {
   reservationId: string;
   eventId: string;
-  expiresAt: string;
 };
 
-export function PurchaseTicketButton({
-  reservationId,
-  eventId,
-  expiresAt,
-}: Props) {
+export function PurchaseTicketButton({ reservationId, eventId }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
-  const purchasing = useRef(false);
+  const expireTimer = useExpireReservation();
 
   async function handlePurchase() {
-    if (purchasing.current || expired) return;
-    if (Date.now() >= new Date(expiresAt).getTime()) {
-      setExpired(true);
-      return;
-    }
+    if (loading) return;
 
-    purchasing.current = true;
     setLoading(true);
     setError(null);
-    let navigating = false;
 
     try {
       const response = await fetch(
         `/api/reservations/${encodeURIComponent(reservationId)}/purchase`,
-        {
-          method: "POST",
-        },
+        { method: "POST" },
       );
       const json = await response.json().catch(() => null);
 
-      if (response.status === 201 || response.status === 200) {
-        const code = typeof json?.code === "string" ? json.code.trim() : null;
-        if (!code) {
-          setError("Brak numeru biletu w odpowiedzi serwera.");
-          return;
-        }
-
-        router.push(`/bilet/${encodeURIComponent(code)}`);
-        navigating = true;
+      // 201 = nowy bilet, 200 = ponowiony zakup zwrócił ten sam kod.
+      // Bez kodu z serwera nigdy nie pokazujemy biletu.
+      if (response.ok && typeof json?.code === "string" && json.code) {
+        // Przycisk zostaje zablokowany do końca nawigacji.
+        router.push(`/bilet/${encodeURIComponent(json.code)}`);
         return;
       }
 
       if (response.status === 410) {
-        setExpired(true);
+        // W liczniku: przełącz cały licznik na „wygasła”; poza nim — własny komunikat.
+        if (expireTimer) expireTimer();
+        else setExpired(true);
         return;
       }
-
-      setError(
-        typeof json?.error === "string"
-          ? json.error
-          : "Nie udało się kupić biletu.",
-      );
+      setError(json?.error ?? GENERIC_MESSAGE);
     } catch {
-      setError("Nie udało się kupić biletu. Spróbuj ponownie.");
-    } finally {
-      if (!navigating) {
-        purchasing.current = false;
-        setLoading(false);
-      }
+      setError(GENERIC_MESSAGE);
     }
+    setLoading(false);
   }
 
   if (expired) {
     return (
-      <div role="alert" className="flex flex-col gap-2">
-        <p className="text-lg font-medium text-red-600">
-          Rezerwacja wygasła, miejsce wróciło do puli
-        </p>
+      <div role="alert" className="flex flex-col items-center gap-6">
+        <p className="alert w-full text-center">{EXPIRED_MESSAGE}</p>
         <Link
           href={`/spektakl/${encodeURIComponent(eventId)}`}
-          className="underline"
+          className="btn-secondary"
         >
           Wróć do widowni
         </Link>
@@ -92,20 +71,20 @@ export function PurchaseTicketButton({
 
   return (
     <>
+      {error && (
+        <p role="alert" className="alert">
+          {error}
+        </p>
+      )}
       <button
         type="button"
         onClick={handlePurchase}
         disabled={loading}
-        aria-busy={loading}
-        className="rounded bg-gray-900 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+        className="btn-primary w-full"
       >
+        {loading && <Spinner />}
         {loading ? "Kupuję bilet…" : "Kupuję bilet"}
       </button>
-      {error && (
-        <p role="alert" className="text-sm text-red-600">
-          {error}
-        </p>
-      )}
     </>
   );
 }

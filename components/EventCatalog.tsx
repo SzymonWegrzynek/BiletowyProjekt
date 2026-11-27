@@ -2,22 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { formatEventDate, formatPrice } from "@/lib/format";
 import { catalogEventSchema, type CatalogEvent } from "@/lib/schemas";
-import { formatPrice } from "@/lib/format";
 
 type CatalogState = "loading" | "ready" | "error";
-
-function formatDate(date: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  if (!year || !month || !day) return date;
-
-  return new Intl.DateTimeFormat("pl-PL", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, day)));
-}
 
 export function EventCatalog() {
   const [events, setEvents] = useState<CatalogEvent[]>([]);
@@ -53,25 +41,35 @@ export function EventCatalog() {
 
   if (state === "loading") {
     return (
-      <p role="status" className="py-4 text-gray-600">
-        Wczytuję repertuar…
-      </p>
+      <div role="status" className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <span className="sr-only">Wczytuję repertuar…</span>
+        {[0, 1, 2].map((card) => (
+          <div
+            key={card}
+            aria-hidden="true"
+            className="card h-64 animate-pulse p-7"
+          >
+            <div className="h-3 w-24 rounded bg-line" />
+            <div className="mt-5 h-10 w-2/3 rounded-lg bg-line" />
+          </div>
+        ))}
+      </div>
     );
   }
 
   if (state === "error") {
     return (
       <section
-        className="flex flex-col items-start gap-4 py-4"
+        className="card flex flex-col items-start gap-5 p-7"
         aria-live="polite"
       >
-        <p role="alert" className="text-red-700">
+        <p role="alert" className="text-ink">
           Nie udało się wczytać repertuaru.
         </p>
         <button
           type="button"
           onClick={() => setAttempt((value) => value + 1)}
-          className="rounded border border-gray-400 px-4 py-2 font-medium text-gray-900 hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-800"
+          className="btn-secondary"
         >
           Spróbuj ponownie
         </button>
@@ -80,47 +78,64 @@ export function EventCatalog() {
   }
 
   if (events.length === 0) {
-    return <p className="py-4 text-gray-600">Brak spektakli</p>;
+    return <p className="card p-7 text-muted">Brak spektakli</p>;
   }
 
   return (
-    <ul className="event-grid">
-      {events.map((event, index) => (
-        <li key={event._id}>
-          <Link
-            href={`/spektakl/${encodeURIComponent(event._id)}`}
-            className="event-card"
-            data-tone={index % 3}
-          >
-            <div className="event-poster" aria-hidden="true">
-              <span className="poster-index">
-                SCENA / {String(index + 1).padStart(2, "0")}
+    <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {events.map((event) => {
+        const date = formatEventDate(event.date);
+        return (
+          <li key={event._id}>
+            <Link
+              href={`/spektakl/${encodeURIComponent(event._id)}`}
+              className="card group flex h-full flex-col p-7 transition duration-300 hover:-translate-y-0.5 hover:border-gold/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold"
+            >
+              <span className="label">{event.stage}</span>
+              <span className="title mt-3 text-5xl leading-none">
+                {event.title}
               </span>
-              <span className="poster-star">✳</span>
-              <span className="poster-title">{event.title}</span>
-            </div>
-            <div className="event-info">
-              <span className="event-stage">{event.stage}</span>
-              <h3 className="event-title">{event.title}</h3>
-              <div className="event-date">
-                <span>{formatDate(event.date)}</span>
-                <span aria-hidden="true">·</span>
-                <span>{event.time}</span>
-              </div>
-              <div className="event-bottom">
-                <span className="event-price">
+
+              <dl className="mt-10 mb-8 grid grid-cols-2 gap-4">
+                <div>
+                  <dt className="label text-muted">Data</dt>
+                  <dd className="mt-1 text-ink">
+                    {date ? `${date.day} ${date.month}` : event.date}
+                  </dd>
+                  {date && (
+                    <dd className="text-sm text-muted">{date.weekday}</dd>
+                  )}
+                </div>
+                <div>
+                  <dt className="label text-muted">Godzina</dt>
+                  <dd className="mt-1 text-ink numerals">{event.time}</dd>
+                </div>
+              </dl>
+
+              <span className="mt-auto flex items-center justify-between gap-4 border-t border-line/60 pt-5 text-sm font-medium text-gold">
+                <span className="numerals text-base text-ink">
                   {event.price === undefined
                     ? "Cena niedostępna"
                     : formatPrice(event.price)}
                 </span>
-                <span className="event-action">
-                  Wybierz miejsce <span aria-hidden="true">↗</span>
+                <span className="flex items-center gap-2">
+                  Wybierz miejsce
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    className="size-5 transition-transform duration-300 group-hover:translate-x-1"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  >
+                    <path d="M5 12h14m-6-6 6 6-6 6" />
+                  </svg>
                 </span>
-              </div>
-            </div>
-          </Link>
-        </li>
-      ))}
+              </span>
+            </Link>
+          </li>
+        );
+      })}
     </ul>
   );
 }

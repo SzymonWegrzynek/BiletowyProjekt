@@ -261,6 +261,7 @@ Każdy `POST` zaczyna się od `schema.safeParse(body)`. Schematy i typy są w `l
 - Ceny pokazujemy w złotych (`6000` → „60 zł”), liczone z groszy.
 - Bilet / „Opłacono” pokazujemy dopiero, gdy `GET /api/reservations/:id` zwróci `status: "paid"` z `code`.
 - Tailwind, mobile-first. Bez dodatkowych bibliotek UI bez pytania.
+- Wygląd: jeden ciemny motyw (grafit, ochra/złoto). Kolory to tokeny w `app/globals.css` (`bg-surface`, `text-gold`, `text-muted`…), a powtarzalne elementy to klasy `.card`, `.label`, `.title`, `.btn-primary`, `.btn-secondary`, `.field`, `.alert` — używaj ich zamiast surowych kolorów Tailwinda. Nagłówki: Cormorant Garamond (`.title`), reszta: Inter.
 
 ### Przepływ danych między ekranami
 

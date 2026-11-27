@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { Spinner } from "@/components/Spinner";
 import {
   watchPaymentStatus,
   type PaymentStatus as Status,
@@ -40,9 +41,9 @@ export function PaymentStatus({
 
   if (state.status === "missing")
     return (
-      <section className="flex flex-col gap-4">
-        <h1 className="text-2xl font-semibold">Nie ma takiej rezerwacji</h1>
-        <Link href="/" className="underline">
+      <section className="flex flex-col items-center gap-8 text-center">
+        <h1 className="title text-4xl">Nie ma takiej rezerwacji</h1>
+        <Link href="/" className="btn-secondary">
           Wróć do repertuaru
         </Link>
       </section>
@@ -50,13 +51,13 @@ export function PaymentStatus({
 
   if (state.status === "expired")
     return (
-      <section className="flex flex-col gap-4">
-        <h1 className="text-2xl font-semibold">
+      <section className="flex flex-col items-center gap-8 text-center">
+        <h1 className="title text-3xl leading-snug text-cinnabar">
           Rezerwacja wygasła, miejsce wróciło do puli
         </h1>
         <Link
           href={eventId ? `/spektakl/${encodeURIComponent(eventId)}` : "/"}
-          className="underline"
+          className="btn-secondary"
         >
           {eventId ? "Wróć do widowni" : "Wróć do repertuaru"}
         </Link>
@@ -64,13 +65,15 @@ export function PaymentStatus({
     );
 
   return (
-    <section className="flex flex-col gap-4" aria-live="polite">
-      <div className="flex items-center gap-3" role="status">
-        <span
-          aria-hidden="true"
-          className="h-6 w-6 shrink-0 animate-spin rounded-full border-2 border-gray-200 border-t-emerald-700 motion-reduce:animate-none"
-        />
-        <h1 className="text-2xl font-semibold">
+    <section
+      className="flex flex-col items-center gap-6 text-center"
+      aria-live="polite"
+    >
+      <div className="flex items-center gap-4 text-gold" role="status">
+        <span className="[&_svg]:size-7">
+          <Spinner />
+        </span>
+        <h1 className="title text-4xl">
           {state.status === "paid"
             ? "Otwieram Twój bilet…"
             : "Płatność w toku…"}
@@ -78,7 +81,7 @@ export function PaymentStatus({
       </div>
       {delayed && state.status !== "paid" ? (
         <>
-          <p>
+          <p className="max-w-sm text-ink">
             Potwierdzenie płatności trwa dłużej niż zwykle. Nie płać ponownie —
             bilet pojawi się tutaj.
           </p>
@@ -86,18 +89,19 @@ export function PaymentStatus({
             type="button"
             onClick={() => watcher.current?.retry()}
             disabled={checking}
-            className="rounded bg-gray-900 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-primary w-full max-w-xs"
           >
+            {checking && <Spinner />}
             {checking ? "Sprawdzam…" : "Sprawdź ponownie"}
           </button>
         </>
       ) : (
-        <p>
+        <p className="max-w-sm text-muted">
           Czekamy na potwierdzenie płatności. Bilet pojawi się automatycznie.
         </p>
       )}
       {state.status === "error" && (
-        <p role="alert" className="text-amber-800">
+        <p role="alert" className="alert">
           Nie udało się sprawdzić płatności. Ponawiamy sprawdzenie — nie płać
           ponownie.
         </p>
