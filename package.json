@@ -9,7 +9,8 @@
     "lint": "eslint",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:setup": "node --experimental-strip-types --env-file-if-exists=.env scripts/setup-db.ts"
+    "db:setup": "node --experimental-strip-types --env-file-if-exists=.env scripts/setup-db.ts",
+    "loyalty:pending": "node --experimental-strip-types --env-file-if-exists=.env scripts/loyalty-pending.ts"
   },
   "dependencies": {
     "mongodb": "^7.7.0",

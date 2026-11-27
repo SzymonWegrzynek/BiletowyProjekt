@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 
 // Voucherify to zewnętrzny program lojalnościowy i jedyne źródło prawdy o
@@ -23,25 +24,31 @@ export type LoyaltyOutcome = "not_applied" | "unknown";
 // „Program lojalnościowy chwilowo niedostępny” → 503 LOYALTY_UNAVAILABLE.
 // Nigdy nie zamieniamy tego na saldo 0.
 export class LoyaltyUnavailableError extends Error {
+  readonly outcome: LoyaltyOutcome;
+  readonly retryAfterSeconds?: number;
+
   constructor(
     message: string,
-    readonly outcome: LoyaltyOutcome,
-    readonly retryAfterSeconds?: number,
+    outcome: LoyaltyOutcome,
+    retryAfterSeconds?: number,
     options?: ErrorOptions,
   ) {
     super(message, options);
+    this.outcome = outcome;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
 // Voucherify odrzucił zapytanie (4xx inne niż limit i autoryzacja) — np.
 // nieznana karta albo za mało punktów. Zmiana na pewno się nie wykonała.
 export class VoucherifyRequestError extends Error {
-  constructor(
-    readonly status: number,
-    readonly key: string | undefined,
-    message: string,
-  ) {
+  readonly status: number;
+  readonly key: string | undefined;
+
+  constructor(status: number, key: string | undefined, message: string) {
     super(message);
+    this.status = status;
+    this.key = key;
   }
 }
 
@@ -70,17 +77,80 @@ function getConfig(): VoucherifyConfig {
   return { apiUrl, appId, secretKey, campaignId };
 }
 
+// Ile sekund czekać według Voucherify: Retry-After albo X-Rate-Limit-Retry
+// (moment odblokowania w sekundach Unix).
 function retryAfter(response: Response): number | undefined {
   const seconds = Number(response.headers.get("Retry-After"));
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+  if (Number.isFinite(seconds) && seconds > 0) return seconds;
+  const unlockAt = Number(response.headers.get("X-Rate-Limit-Retry"));
+  if (Number.isFinite(unlockAt) && unlockAt > 0) {
+    const left = Math.ceil(unlockAt - Date.now() / 1000);
+    if (left > 0) return left;
+  }
+  return undefined;
 }
+
+// Po 429 nie pytamy Voucherify, dopóki limit nie minie — kolejne zapytania
+// tylko by go przedłużały (Sandbox: 100 wywołań na godzinę). Pamięć jednej
+// instancji: to oszczędzanie wywołań, nie gwarancja poprawności.
+const DEFAULT_COOLDOWN_SECONDS = 30;
+const globalForVoucherify = globalThis as typeof globalThis & {
+  _voucherifyBlockedUntil?: number;
+};
+
+export function resetVoucherifyCooldown(): void {
+  globalForVoucherify._voucherifyBlockedUntil = undefined;
+}
+
+function checkCooldown(): void {
+  const blockedUntil = globalForVoucherify._voucherifyBlockedUntil ?? 0;
+  const left = Math.ceil((blockedUntil - Date.now()) / 1000);
+  if (left > 0) {
+    throw new LoyaltyUnavailableError(
+      "Voucherify: limit zapytań, czekamy na odblokowanie",
+      "not_applied",
+      left,
+    );
+  }
+}
+
+// Odczyt ponawiamy raz po krótkiej przerwie (timeout, 5xx, krótki limit).
+// Zmian salda nie ponawiamy tutaj nigdy — ich wynik rozstrzyga rejestr
+// operacji (lib/loyalty-operations.ts), żeby nie zmienić salda dwa razy.
+const READ_RETRY_DELAY_MS = 300;
+const READ_RETRY_MAX_WAIT_SECONDS = 1;
 
 async function request(
   method: "GET" | "POST",
   path: (campaignId: string) => string,
   body?: unknown,
 ): Promise<unknown> {
+  const retryable = method === "GET";
+  try {
+    return await send(method, path, body);
+  } catch (error) {
+    if (!retryable || !(error instanceof LoyaltyUnavailableError)) throw error;
+    // Brak kluczy / zły klucz / długi limit: ponowienie nic nie da.
+    const shortLimit =
+      error.outcome === "not_applied" &&
+      error.retryAfterSeconds !== undefined &&
+      error.retryAfterSeconds <= READ_RETRY_MAX_WAIT_SECONDS;
+    if (error.outcome !== "unknown" && !shortLimit) throw error;
+    if (shortLimit) resetVoucherifyCooldown();
+    await sleep(
+      shortLimit ? error.retryAfterSeconds! * 1000 : READ_RETRY_DELAY_MS,
+    );
+    return send(method, path, body);
+  }
+}
+
+async function send(
+  method: "GET" | "POST",
+  path: (campaignId: string) => string,
+  body?: unknown,
+): Promise<unknown> {
   const config = getConfig();
+  checkCooldown();
   const url = `${config.apiUrl}${path(encodeURIComponent(config.campaignId))}`;
 
   let response: Response;
@@ -107,10 +177,12 @@ async function request(
   }
 
   if (response.status === 429) {
+    const seconds = retryAfter(response) ?? DEFAULT_COOLDOWN_SECONDS;
+    globalForVoucherify._voucherifyBlockedUntil = Date.now() + seconds * 1000;
     throw new LoyaltyUnavailableError(
       "Voucherify: przekroczony limit zapytań",
       "not_applied",
-      retryAfter(response),
+      seconds,
     );
   }
   if (response.status === 401 || response.status === 403) {

@@ -66,6 +66,12 @@ export async function ensureIndexes(): Promise<void> {
     { code: 1 },
     { unique: true, partialFilterExpression: { code: { $exists: true } } },
   );
+  // Zaległe rozliczenia punktów (pnpm loyalty:pending): szukamy po stanie.
+  await loyaltyOperationsCollection().createIndex({ status: 1, updatedAt: 1 });
+  await reservations.createIndex(
+    { pointsEarnedStatus: 1, paidAt: 1 },
+    { partialFilterExpression: { pointsEarnedStatus: "pending" } },
+  );
   // Liczniki limitu sprząta TTL po końcu okna; limit działa i bez tego indeksu.
   await rateLimitsCollection().createIndex(
     { expiresAt: 1 },

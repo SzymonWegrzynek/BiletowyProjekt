@@ -6,6 +6,7 @@ import {
   getLoyaltyCard,
   hasLoyaltyTransaction,
   joinLoyaltyProgram,
+  resetVoucherifyCooldown,
 } from "@/lib/voucherify";
 
 // Adapter Voucherify na podmienionym fetch — bez sieci i bez bazy.
@@ -30,9 +31,11 @@ beforeEach(() => {
   vi.stubEnv("VOUCHERIFY_API_URL", "https://vf.test/");
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
+  resetVoucherifyCooldown();
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
@@ -190,6 +193,91 @@ describe("adapter Voucherify", () => {
       await expect(
         hasLoyaltyTransaction("LC-ABC", "earn:abc"),
       ).rejects.toBeInstanceOf(LoyaltyUnavailableError);
+    });
+  });
+
+  describe("awarie: kontrolowane ponowienia i limit", () => {
+    it("odczyt: 5xx, potem sukces → jedno ponowienie, wynik poprawny", async () => {
+      fetchMock
+        .mockResolvedValueOnce(json(503, {}))
+        .mockResolvedValueOnce(json(200, MEMBER));
+      await expect(getLoyaltyCard("LC-ABC")).resolves.toMatchObject({
+        balance: 1200,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("odczyt: timeout, potem sukces → usługa wróciła, saldo poprawne", async () => {
+      fetchMock
+        .mockRejectedValueOnce(new DOMException("timeout", "TimeoutError"))
+        .mockResolvedValueOnce(json(200, MEMBER));
+      await expect(getLoyaltyCard("LC-ABC")).resolves.toMatchObject({
+        balance: 1200,
+      });
+    });
+
+    it("odczyt: dwa razy 5xx → niedostępne po jednym ponowieniu, nie więcej", async () => {
+      fetchMock.mockImplementation(async () => json(500, {}));
+      await expect(getLoyaltyCard("LC-ABC")).rejects.toBeInstanceOf(
+        LoyaltyUnavailableError,
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("zmiana salda: 5xx → bez ponowienia (wynik rozstrzyga rejestr operacji)", async () => {
+      fetchMock.mockImplementation(async () => json(502, {}));
+      const error = await adjustLoyaltyBalance("LC-ABC", 500, {
+        sourceId: "earn:abc",
+        reason: "Nagroda",
+      }).catch((e) => e);
+      expect(error.outcome).toBe("unknown");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("krótki limit (Retry-After 1) przy odczycie → odczekane i ponowione", async () => {
+      fetchMock
+        .mockResolvedValueOnce(json(429, {}, { "Retry-After": "1" }))
+        .mockResolvedValueOnce(json(200, MEMBER));
+      await expect(getLoyaltyCard("LC-ABC")).resolves.toMatchObject({
+        balance: 1200,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("po 429 kolejne zapytania nie idą do Voucherify, dopóki limit trwa", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-27T12:00:00Z"));
+      fetchMock.mockResolvedValueOnce(json(429, {}, { "Retry-After": "60" }));
+      await expect(getLoyaltyCard("LC-ABC")).rejects.toBeInstanceOf(
+        LoyaltyUnavailableError,
+      );
+
+      vi.setSystemTime(new Date("2026-11-27T12:00:30Z"));
+      const blocked = await adjustLoyaltyBalance("LC-ABC", 10, {
+        sourceId: "x",
+        reason: "x",
+      }).catch((e) => e);
+      expect(blocked).toBeInstanceOf(LoyaltyUnavailableError);
+      expect(blocked.outcome).toBe("not_applied");
+      expect(blocked.retryAfterSeconds).toBe(30);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(new Date("2026-11-27T12:01:01Z"));
+      fetchMock.mockResolvedValueOnce(json(200, MEMBER));
+      await expect(getLoyaltyCard("LC-ABC")).resolves.toMatchObject({
+        balance: 1200,
+      });
+    });
+
+    it("429 bez Retry-After, z X-Rate-Limit-Retry → czas odblokowania z nagłówka", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-27T12:00:00Z"));
+      const unlockAt = Date.parse("2026-11-27T12:00:45Z") / 1000;
+      fetchMock.mockResolvedValueOnce(
+        json(429, {}, { "X-Rate-Limit-Retry": String(unlockAt) }),
+      );
+      const error = await getLoyaltyCard("LC-ABC").catch((e) => e);
+      expect(error.retryAfterSeconds).toBe(45);
     });
   });
 });
