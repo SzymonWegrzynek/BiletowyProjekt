@@ -3,6 +3,7 @@ import { reservationsCollection } from "@/lib/db";
 import { apiError } from "@/lib/errors";
 import { reservationIdSchema } from "@/lib/schemas";
 import { generateTicketCode } from "@/lib/ticket";
+import { sendTicketConfirmation } from "@/lib/server/send-ticket-confirmation";
 
 const DUPLICATE_KEY = 11000;
 const MAX_CODE_ATTEMPTS = 3;
@@ -32,6 +33,7 @@ export async function POST(
         { returnDocument: "after" },
       );
       if (updated) {
+        await sendTicketConfirmation(id);
         return Response.json({ code: updated.code }, { status: 201 });
       }
       break;
@@ -49,6 +51,7 @@ export async function POST(
   );
   if (!existing) return apiError("NOT_FOUND", "Nie ma takiej rezerwacji");
   if (existing.status === "purchased") {
+    await sendTicketConfirmation(id);
     // Ponowny zakup (np. podwójny klik) zwraca ten sam bilet.
     return Response.json({ code: existing.code }, { status: 200 });
   }

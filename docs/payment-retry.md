@@ -15,8 +15,8 @@ ustawić `cancel_url` na `${APP_URL}/rezerwacja/${reservationId}?anulowano=1`.
 Parametr wyświetla komunikat, ale nie zmienia statusu ani czasu rezerwacji.
 
 Ponowne „Zapłać” sprawdza `GET /api/reservations/:id`, następnie wywołuje
-`POST /api/reservations/:id/checkout`. Te endpointy są zależnościami Etapu II
-i nie są jeszcze zaimplementowane w tym repozytorium. Wszystkie wejścia na
+`POST /api/reservations/:id/checkout`. Odczyt statusu jest już zaimplementowany
+w karcie C; backend checkout nadal jest zależnością Etapu II. Wszystkie wejścia na
 rezerwację używają teraz wspólnego `CheckoutButton` z kwotą `amount` zapisaną
 w rezerwacji. Pierwsza próba wywołuje bezpośrednio checkout, a po 409 odczytuje
 status. Powrót po anulowaniu sprawdza status również przed checkoutem.

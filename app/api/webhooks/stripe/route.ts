@@ -12,6 +12,7 @@ import {
   compensateAttempt,
 } from "@/lib/payment-attempts";
 import { reservationIdSchema } from "@/lib/schemas";
+import { sendTicketConfirmation } from "@/lib/server/send-ticket-confirmation";
 import {
   PAYMENT_RETRY_AFTER_SECONDS,
   PaymentConfigError,
@@ -167,6 +168,9 @@ async function handlePaidSession(
         // Bilet już jest. Punkty dopisujemy po nim — awaria Voucherify
         // zostawia nagrodę "pending", ale nie zabiera biletu.
         await awardPurchasePoints(_id);
+        // Mail z biletem i rozliczeniem (karta C). Stan wysyłki jest przy
+        // rezerwacji; błąd poczty nie psuje zakupu ani odpowiedzi webhooka.
+        await sendTicketConfirmation(reservationId);
         return;
       }
       break;
@@ -190,6 +194,8 @@ async function handlePaidSession(
       // Ponowienie — przy okazji dokańczamy nagrodę, jeśli poprzednio
       // Voucherify nie odpowiedział (operacja wykona się najwyżej raz).
       await awardPurchasePoints(_id);
+      // Mail idzie raz: istniejący stan wysyłki → "already-claimed".
+      await sendTicketConfirmation(reservationId);
       return;
     }
     // Opłacona inną sesją (dwie karty, podwójny klik) — druga płatność wraca.

@@ -9,6 +9,10 @@
     "lint": "eslint",
     "format": "prettier --write .",
     "test": "vitest run",
+    "email:preview": "node --experimental-strip-types --env-file-if-exists=.env scripts/test-ticket-email.ts",
+    "email:test": "node --experimental-strip-types --env-file-if-exists=.env scripts/test-ticket-email.ts --send",
+    "email:manage": "node --experimental-strip-types --env-file-if-exists=.env scripts/manage-ticket-email.ts",
+    "email:inspect": "node --experimental-strip-types --env-file-if-exists=.env scripts/check-resend-email.ts",
     "db:setup": "node --experimental-strip-types --env-file-if-exists=.env scripts/setup-db.ts",
     "loyalty:pending": "node --experimental-strip-types --env-file-if-exists=.env scripts/loyalty-pending.ts"
   },

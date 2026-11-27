@@ -33,3 +33,6 @@ export const STUB_RESERVATION_STATUS = {
     expiresAt: "2026-11-14T18:00:00.000Z",
   },
 } as const;
+
+// Etap III — saldo nowego klienta (frontend A/B na zaślepce).
+export const STUB_LOYALTY_POINTS = 1000;

@@ -20,20 +20,27 @@ export async function GET(
     return apiError("NOT_FOUND", "Nie ma takiej rezerwacji", NO_STORE);
   }
 
-  const reservation = await reservationsCollection().findOne(
-    { _id: new ObjectId(parsed.data) },
-    {
-      projection: {
-        status: 1,
-        amount: 1,
-        expiresAt: 1,
-        code: 1,
-        pointsUsed: 1,
-        pointsEarned: 1,
-        cardAmount: 1,
+  let reservation;
+  try {
+    reservation = await reservationsCollection().findOne(
+      { _id: new ObjectId(parsed.data) },
+      {
+        projection: {
+          status: 1,
+          amount: 1,
+          expiresAt: 1,
+          code: 1,
+          pointsUsed: 1,
+          pointsEarned: 1,
+          cardAmount: 1,
+        },
       },
-    },
-  );
+    );
+  } catch (error) {
+    // Szczegóły awarii tylko w logach; front ponowi odczyt.
+    console.error(`Odczyt rezerwacji ${parsed.data} nie powiódł się`, error);
+    return apiError("RESERVATION_UNAVAILABLE", undefined, NO_STORE);
+  }
   if (!reservation) {
     return apiError("NOT_FOUND", "Nie ma takiej rezerwacji", NO_STORE);
   }
@@ -50,7 +57,8 @@ export async function GET(
   return Response.json(
     {
       status,
-      amount: reservation.amount,
+      // Starsze rezerwacje bez kwoty: null, nie dzisiejsza cena spektaklu.
+      amount: reservation.amount ?? null,
       expiresAt: reservation.expiresAt.toISOString(),
       // Rozliczenie punktów utrwala webhook przy opłaceniu; wcześniej 0.
       pointsUsed: status === "paid" ? (reservation.pointsUsed ?? 0) : 0,
