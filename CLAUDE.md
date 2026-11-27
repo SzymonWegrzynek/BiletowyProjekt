@@ -7,7 +7,8 @@ Instrukcje dla Claude Code w projekcie **Kasa biletowa teatru (PAS S01)**.
 System rezerwacji biletów do teatru. Klient wybiera spektakl i miejsce, rezerwuje je na 15 minut, płaci przez **Stripe Checkout** (tryb testowy) i dostaje kod biletu.
 
 - **Etap I** (zrobiony): rezerwacja, wygasanie, zakup bez płatności (`/purchase`), limit 429.
-- **Etap II** (teraz): płatności Stripe — cena, sesja Checkout, webhook, status rezerwacji.
+- **Etap II** (zrobiony): płatności Stripe — cena, sesja Checkout, webhook, status rezerwacji.
+- **Etap III** (teraz): punkty lojalnościowe Voucherify — saldo, płatność częściowo punktami, nagroda za zakup, mail z biletem (Resend).
 
 Projekt szkolny z przedmiotu Projektowanie i Architektura Systemów. Ocena opiera się na poprawności (reliability): transakcje, unikalne indeksy, warunkowe update'y, idempotencja.
 
@@ -90,6 +91,27 @@ Endpointy z tabeli wyżej zostają. Etap II tylko **dodaje** pola i endpointy:
 - `takenSeats`: miejsca kupione + miejsca z **ważną** rezerwacją (bez wygasłych)
 - `expiresAt`: ISO string
 
+### Etap III — punkty (kontrakt wewnętrzny)
+
+Etap III znów tylko **dodaje**. Checkout bez `points` działa dokładnie jak w Etapie II.
+
+| Endpoint                              | Body                     | Odpowiedź                                                                                |
+| ------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------- |
+| `GET /api/loyalty?email=…`            | —                        | `200 { email, points }`; nowy e-mail = 1000 pkt; 400 zły e-mail; 503 awaria              |
+| `POST /api/reservations/:id/checkout` | opcjonalnie `{ points }` | `200 { url }`; sesja Stripe na `amount - points`                                         |
+| `GET /api/reservations/:id`           | —                        | jak wyżej + `pointsUsed` (0 do opłacenia); po opłaceniu też `pointsEarned`, `cardAmount` |
+
+Reguły:
+
+- 1 punkt = 1 grosz. `points` — liczba całkowita ≥ 0, najwyżej `floor(amount / 2)`. Brak body, `{}` i `{ points: 0 }` = zakup bez punktów.
+- Nagroda: `pointsEarned = floor(cardAmount / 100) * 10`, tylko od części zapłaconej kartą, naliczana **po webhooku** z opłaconej sesji.
+- **Voucherify jest źródłem salda.** Nasza baza trzyma powiązanie e-mail → karta, rejestr operacji i próby płatności — nigdy saldo.
+- E-mail klienta programu: `trim` + małe litery (`loyaltyEmailSchema`).
+- Moment rozliczenia: punkty **schodzą przy checkoucie** (przed utworzeniem sesji Stripe), **dochodzą po webhooku** opłaconej sesji, **wracają**, gdy sesji na pewno nie da się opłacić (Stripe jej nie utworzył, wygasła, została zastąpiona i wygaszona) albo gdy płatność wróciła do klienta (zwrot z Etapu II).
+- Rezerwacja po opłaceniu: `cardAmount + pointsUsed = amount`.
+
+Błędy checkoutu z punktami: `400 VALIDATION_ERROR` (zła liczba, ponad połowę ceny), `409 INSUFFICIENT_POINTS` (za małe saldo w Voucherify), `503 LOYALTY_UNAVAILABLE` + `Retry-After` (Voucherify nie potwierdził salda — płatność nie rusza na zgadywanych danych).
+
 ### Błędy
 
 Format: `{ "error": "komunikat po polsku", "code": "KOD" }`
@@ -103,6 +125,8 @@ Format: `{ "error": "komunikat po polsku", "code": "KOD" }`
 | 409    | `ALREADY_PAID`        | `/checkout` dla opłaconej rezerwacji               |
 | 429    | `RATE_LIMITED`        | za dużo rezerwacji z 1 IP                          |
 | 503    | `PAYMENT_UNAVAILABLE` | Stripe nie odpowiada / brak konfiguracji płatności |
+| 409    | `INSUFFICIENT_POINTS` | checkout: za mało punktów na karcie (Etap III)     |
+| 503    | `LOYALTY_UNAVAILABLE` | Voucherify nie odpowiada / brak konfiguracji       |
 
 Przy 429 i 503 dodajemy nagłówek `Retry-After` (sekundy).
 
@@ -118,6 +142,9 @@ Każdy błąd zwracaj przez `apiError()` z `lib/errors.ts`. Nigdy nie zwracaj 50
 6. Rezerwacja jest opłacona **tylko** po webhooku Stripe'a z poprawnym podpisem. Powrót na `success_url` niczego nie dowodzi.
 7. Kwota płatności pochodzi wyłącznie z `reservation.amount` w bazie — nigdy z requestu ani z aktualnej ceny spektaklu.
 8. Klient, który zapłacił, dostaje **bilet albo zwrot** — nigdy nic. Webhook nie odpowiada 2xx, dopóki nie zapisze biletu albo nie zleci zwrotu.
+
+9. Punkty wydane na próbę płatności kończą się **biletem albo zwrotem punktów** — nigdy nic. Punkty wracają tylko z próby, której sesji nie da się już opłacić; spóźniona płatność próby z oddanymi punktami → zwrot pieniędzy (`points_returned`).
+10. Każda zmiana salda w Voucherify (bonus, potrącenie, nagroda, zwrot) to operacja w `loyaltyOperations` ze stałym id, wykonywana najwyżej raz.
 
 **Invariantów pilnuje baza, nie `if`-y.** Nigdy nie pisz wzorca „najpierw `findOne`, potem `insertOne`/`updateOne`” dla operacji, które mogą się ścigać.
 
@@ -242,6 +269,16 @@ Ponowny zakup tej samej rezerwacji **zwraca ten sam kod**, nie tworzy drugiego b
 - `APP_URL` z env, nigdy z nagłówka `Host`.
 - Klucze: tylko testowe (`sk_test_…`), tylko w `.env` / Vercelu, **bez** prefiksu `NEXT_PUBLIC_`.
 
+### Płatność punktami (Etap III)
+
+- `lib/payment-attempts.ts`: każda płatność z `points > 0` to dokument w `checkoutAttempts` (`_id` = attempt). Stany: `spending` → `open` → `paid`, albo → `returning` → `returned`; `failed` = potrącenie odrzucone. Przejścia tylko warunkowymi zapisami — `open → paid` (webhook) i `open → returning` (zwrot) wykluczają się w bazie.
+- `/checkout` z punktami: odczyt rezerwacji → limit połowy → (poprzednia próba z punktami: wygaszenie sesji i zwrot) → `spendPointsForCheckout` (próba `spending` **przed** potrąceniem, `redeem:<rezerwacja>:<attempt>`) → sesja Stripe na `amount - points` z `metadata.attemptId` i `idempotencyKey: checkout-<attempt>` → `openAttempt` → zapis `checkoutSessionId` + `checkoutAttemptId`. Błąd Stripe'a → zwrot punktów i 503.
+- Webhook `checkout.session.completed` z `attemptId`: `claimAttemptForPayment` (open → paid), `pointsUsed` z próby w bazie (nie z metadata), zapis razem z biletem. Duplikat / rezerwacja przejęta → zwrot pieniędzy **i** punktów. Próba już zwrócona → zwrot pieniędzy `points_returned`, bez biletu.
+- Webhook `checkout.session.expired` z `attemptId` → zwrot punktów. Voucherify nie odpowiada → 500 (Stripe ponowi), próba zostaje `returning`.
+- Zaległe próby dokańcza `pnpm loyalty:pending --finish` (`returning`; `spending` starsze niż czas życia sesji + 5 min; `open` po czasie sesji — decyduje stan sesji w Stripe).
+- Drugi mechanizm (`lib/loyalty-spend.ts`, `releaseSpendIfUnused`): punkty z **wygasłej rezerwacji** wracają przy odczycie salda, webhooku albo skrypcie, a rezerwacja dostaje `pointsReleasedAt` (spóźniona płatność → zwrot `points_released`). Oba mechanizmy zwracają tą samą operacją `return:<rezerwacja>:<próba>`, więc punkty wracają najwyżej raz; webhook domyka też stan próby.
+- Wygaszenie sesji: `expireCheckoutSessionQuietly()` zwraca `true` tylko przy potwierdzonym `expired` — tylko wtedy wolno oddać punkty.
+
 ### Walidacja
 
 Każdy `POST` zaczyna się od `schema.safeParse(body)`. Schematy i typy są w `lib/schemas.ts`; typy wyprowadzamy przez `z.infer`, nie piszemy ich ręcznie drugi raz.
@@ -325,4 +362,6 @@ Do czasu podpięcia bazy front pracuje na zaślepkach z `lib/stubs.ts`: spektakl
 - ❌ Oznaczać rezerwację jako opłaconą gdziekolwiek poza webhookiem (i starym `/purchase`)
 - ❌ Brać kwotę płatności z requestu albo z frontu
 - ❌ Używać kluczy `sk_live_…` lub wystawiać klucz Stripe do przeglądarki
-- ❌ Dodawać funkcji spoza Etapu II (kolejki, e-mail z biletem) bez prośby
+- ❌ Dodawać funkcji spoza Etapu III (kolejki itp.) bez prośby
+- ❌ Brać liczbę punktów albo saldo z frontu jako prawdę — saldo sprawdza Voucherify, punkty bilet bierze z próby w bazie
+- ❌ Oddawać punkty z próby, której sesji Stripe nie wygasił (mogła zostać opłacona)

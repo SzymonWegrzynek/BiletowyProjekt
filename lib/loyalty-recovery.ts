@@ -2,6 +2,12 @@ import { loyaltyOperationsCollection, reservationsCollection } from "./db.ts";
 import { applyLoyaltyOperation } from "./loyalty-operations.ts";
 import { settlePurchaseReward } from "./loyalty-rewards.ts";
 import { findUnreturnedSpends, releaseSpendIfUnused } from "./loyalty-spend.ts";
+import {
+  compensateAttempt,
+  listUnfinishedAttempts,
+} from "./payment-attempts.ts";
+import type { CheckoutAttempt } from "./schemas.ts";
+import { getStripe } from "./stripe.ts";
 import { LoyaltyUnavailableError } from "./voucherify.ts";
 
 // Zaległe rozliczenia punktów po awarii Voucherify: nagrody za opłacone bilety
@@ -34,6 +40,17 @@ export type PendingLoyaltyWork = {
     autoFinish: boolean;
   }[];
   failed: { id: string; points: number; lastError?: string }[];
+  // Próby płatności z punktami, które nie skończyły się zapłatą ani zwrotem.
+  attempts: {
+    id: string;
+    reservationId: string;
+    email: string;
+    status: string;
+    points: number;
+    sessionId?: string;
+    updatedAt: Date;
+    lastError?: string;
+  }[];
 };
 
 // Zawężenie do klientów (np. --email=… w skrypcie albo domena w testach).
@@ -44,7 +61,7 @@ export async function listPendingLoyaltyWork({
   email,
 }: LoyaltyWorkScope = {}): Promise<PendingLoyaltyWork> {
   const byEmail = email === undefined ? {} : { email };
-  const [rewards, operations, failed] = await Promise.all([
+  const [rewards, operations, failed, attempts] = await Promise.all([
     reservationsCollection()
       .find(
         { status: "purchased", pointsEarnedStatus: "pending", ...byEmail },
@@ -63,6 +80,7 @@ export async function listPendingLoyaltyWork({
       .sort({ updatedAt: -1 })
       .limit(limit)
       .toArray(),
+    listUnfinishedAttempts({ limit, email }),
   ]);
 
   return {
@@ -85,6 +103,16 @@ export async function listPendingLoyaltyWork({
       id: o._id,
       points: o.points,
       lastError: o.lastError,
+    })),
+    attempts: attempts.map((a) => ({
+      id: a._id,
+      reservationId: a.reservationId,
+      email: a.email,
+      status: a.status,
+      points: a.points,
+      sessionId: a.sessionId,
+      updatedAt: a.updatedAt,
+      lastError: a.lastError,
     })),
   };
 }
@@ -194,6 +222,29 @@ export async function finishPendingLoyaltyWork({
     }
   }
 
+  // Na końcu próby płatności z punktami: punkty wracają z prób, których
+  // sesji na pewno nie da się opłacić.
+  const attempts = await listUnfinishedAttempts({
+    limit: Math.max(budget, 0),
+    email,
+  });
+  for (const attempt of attempts) {
+    if (report.stoppedByLimit || budget <= 0) break;
+    budget -= 1;
+    try {
+      const reason = await returnReasonFor(attempt);
+      if (!reason) {
+        report.waiting += 1;
+        continue;
+      }
+      const result = await compensateAttempt(attempt._id, reason);
+      if (result === "returned") report.finished += 1;
+      else if (result === "pending") report.waiting += 1;
+    } catch (error) {
+      onError(error);
+    }
+  }
+
   return report;
 }
 
@@ -211,4 +262,23 @@ export async function settleCustomerLoyalty(email: string): Promise<void> {
   } catch (error) {
     console.error(`Nie dokończono rozliczeń punktów ${email}`, error);
   }
+}
+
+// Czy punkty próby wolno już oddać. "open" rozstrzyga stan sesji w Stripe:
+// expired → tak; complete → nie (bilet albo zwrot da webhook); open → czekamy.
+async function returnReasonFor(
+  attempt: CheckoutAttempt,
+): Promise<string | undefined> {
+  if (attempt.status === "returning") return attempt.returnReason ?? "retry";
+  if (attempt.status === "spending") {
+    // Starsza niż czas życia sesji: nawet jeśli sesja powstała, już wygasła.
+    return "stale_spending";
+  }
+  if (attempt.status === "open" && attempt.sessionId) {
+    const session = await getStripe().checkout.sessions.retrieve(
+      attempt.sessionId,
+    );
+    return session.status === "expired" ? "session_expired" : undefined;
+  }
+  return undefined;
 }

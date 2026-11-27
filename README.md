@@ -321,7 +321,7 @@ Klient, który zapłacił, dostaje bilet albo zwrot: płatność po wygaśnięci
 3. CLI wypisze `whsec_…` — wklej go do `STRIPE_WEBHOOK_SECRET` i uruchom ponownie `pnpm dev`.
 4. Ręczne zdarzenie testowe: `stripe trigger checkout.session.completed`. Taka sesja nie ma id naszej rezerwacji, więc webhook odpowie 200 i zleci zwrot (widać go w panelu Stripe).
 
-Na Vercelu webhook jest ustawiony w panelu Stripe (test) na `https://<adres-vercela>/api/webhooks/stripe` ze zdarzeniem `checkout.session.completed`, a jego sekret jest w zmiennych Vercela.
+Na Vercelu webhook jest ustawiony w panelu Stripe (test) na `https://<adres-vercela>/api/webhooks/stripe` ze zdarzeniami `checkout.session.completed` i `checkout.session.expired` (Etap III: zwrot punktów z porzuconych płatności), a jego sekret jest w zmiennych Vercela.
 
 ### Karty testowe
 
@@ -357,6 +357,37 @@ Saldo punktów trzyma **Voucherify** (kampania lojalnościowa, klient identyfiko
 - **Wydawanie punktów** (`lib/loyalty-spend.ts`, dla checkoutu z punktami): `spendLoyaltyPoints({ email, reservationId, attempt, points })` — operacja `redeem:<reservationId>:<attempt>`, więc powtórzony checkout potrąca raz. Wydawanie jednego klienta idzie po kolei (blokada na koncie), a saldo z Voucherify jest sprawdzane tuż przed potrąceniem. Saldo może się zmienić także poza aplikacją: gdy po potrąceniu wyjdzie ujemne, punkty wracają, a klient dostaje odmowę (`InsufficientPointsError`). `returnSpentPoints({ reservationId, attempt })` oddaje punkty po nieukończonej płatności albo anuluje potrącenie, które jeszcze się nie wykonało.
 - Testy zawsze na atrapie (`tests/fixtures/fake-voucherify.ts`) — Sandbox ma limit 100 wywołań API na godzinę.
 
+### Płatność punktami (karta B)
+
+`POST /api/reservations/:id/checkout` przyjmuje opcjonalne `{ points }` (1 punkt = 1 grosz, najwyżej połowa ceny). Brak body działa jak w Etapie II.
+
+1. Walidacja: całkowite, ≥ 0, ≤ `floor(amount / 2)` → inaczej `400`. Kwota i e-mail zawsze z rezerwacji.
+2. Saldo z Voucherify tuż przed potrąceniem: za mało → `409 INSUFFICIENT_POINTS`, awaria → `503 LOYALTY_UNAVAILABLE`.
+3. Potrącenie (`redeem:<rezerwacja>:<próba>`), potem sesja Stripe na `amount - points`. Przykład: 60 zł i 1000 pkt → Stripe pobiera 50 zł, po zapłacie +500 pkt, saldo nowego klienta 1000 → 0 → 500.
+4. Webhook zapisuje przy bilecie `pointsUsed`, `cardAmount`, `pointsEarned`; widać je w `GET /api/reservations/:id`.
+
+Każda próba z punktami jest w kolekcji `checkoutAttempts` (`spending` → `open` → `paid` albo → `returning` → `returned`).
+
+### Zagrożenie: punkty pobrane, ale płatność nieukończona
+
+Voucherify i Stripe nie mają wspólnej transakcji, więc punkty schodzą przed płatnością. Klient nie może ich stracić za nieukończony zakup:
+
+| Sytuacja                                    | Co się dzieje                                                                                                                                 |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stripe nie utworzył sesji                   | punkty wracają od razu, `503 PAYMENT_UNAVAILABLE`                                                                                             |
+| Klient wrócił ze Stripe'a i płaci ponownie  | stara sesja jest wygaszana; po potwierdzeniu wygaszenia punkty wracają przed nowym potrąceniem                                                |
+| Klient porzucił płatność                    | po 30 min `checkout.session.expired` → punkty wracają (raz, także przy ponowieniach)                                                          |
+| Rezerwacja wygasła bez zapłaty              | punkty wracają przy najbliższym odczycie salda, webhooku albo skrypcie (`releaseSpendIfUnused`); spóźniona płatność → zwrot `points_released` |
+| Stara sesja nie dała się wygasić (opłacona) | punkty zostają; webhook: bilet albo zwrot pieniędzy **i** punktów                                                                             |
+| Druga opłacona sesja / miejsce przejęte     | zwrot pieniędzy (Etap II) + zwrot punktów tej próby                                                                                           |
+| Płatność próby, której punkty już oddano    | zwrot pieniędzy `points_returned`, bez biletu                                                                                                 |
+| Voucherify padł przy zwrocie                | próba `returning`, webhook 500 (Stripe ponowi), `pnpm loyalty:pending --finish`                                                               |
+| Proces padł w trakcie checkoutu             | próba `spending`; skrypt oddaje punkty po czasie życia sesji (+5 min)                                                                         |
+
+Nagroda za zakup nie wymaga cofania przy zwrotach: zwracamy tylko płatności, które nie dały biletu, a nagroda powstaje wyłącznie z biletem. Ręczny zwrot biletu w panelu Stripe nie cofa punktów automatycznie — trzeba je skorygować w panelu Voucherify.
+
+> ⚠️ Webhook w panelu Stripe (i `stripe listen`) musi wysyłać **także** `checkout.session.expired` — bez tego punkty z porzuconych płatności wróci dopiero `pnpm loyalty:pending --finish`.
+
 ### Awarie Voucherify i zaległe operacje
 
 Lekcja E04: awaria programu lojalnościowego nie może dać fałszywego salda ani zgubić rozliczenia zakupu.
@@ -378,6 +409,7 @@ pnpm loyalty:pending --finish --email=jan@example.com
 
 - Dokańczanie jest bezpieczne, bo każda operacja ma stałe id i wykonuje się najwyżej raz. Operacje `unknown` są rozstrzygane po historii karty dopiero 60 s po niepewnej próbie.
 - Skrypt dokańcza dopisania (`bonus:`, `earn:`) i zwroty (`return:`), a wykonane potrącenia z wygasłych albo przejętych rezerwacji zwraca. Niedokończonych potrąceń (`redeem:`) nie wykonuje, bo zabrałyby punkty za płatność, której klient mógł nie dokończyć. Rozstrzyga je ścieżka płatności (`returnSpentPoints`).
+- Skrypt pokazuje i dokańcza też **płatności z punktami bez zapłaty ani zwrotu** (`checkoutAttempts`): `returning`, utknięte `spending` i `open` po czasie życia sesji — te ostatnie tylko, gdy Stripe potwierdzi, że sesja wygasła (potrzebny `STRIPE_SECRET_KEY`).
 - Na limicie zapytań skrypt przerywa pracę. Uruchom go ponownie po czasie z komunikatu.
 - Operacje `failed` (odrzucone przez Voucherify) wymagają ręcznego sprawdzenia w panelu Voucherify.
 

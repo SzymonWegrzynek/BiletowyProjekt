@@ -324,12 +324,18 @@ describe.skipIf(!process.env.MONGODB_URI)("Etap II: płatności", () => {
       expect(res.status).toBe(200);
       expect(res.headers.get("Cache-Control")).toBe("no-store");
       const json = await res.json();
+      // Etap III dopisuje pointsUsed (0 do czasu opłacenia).
       expect(Object.keys(json).sort()).toEqual([
         "amount",
         "expiresAt",
+        "pointsUsed",
         "status",
       ]);
-      expect(json).toMatchObject({ status: "held", amount: 4321 });
+      expect(json).toMatchObject({
+        status: "held",
+        amount: 4321,
+        pointsUsed: 0,
+      });
       expect(new Date(json.expiresAt).toISOString()).toBe(json.expiresAt);
     });
 
@@ -341,13 +347,15 @@ describe.skipIf(!process.env.MONGODB_URI)("Etap II: płatności", () => {
         paidAt: new Date(),
       });
       const json = await (await status(id)).json();
+      // Stary zakup bez rozliczenia punktów: pointsUsed 0, bez pointsEarned.
       expect(Object.keys(json).sort()).toEqual([
         "amount",
         "code",
         "expiresAt",
+        "pointsUsed",
         "status",
       ]);
-      expect(json).toMatchObject({ status: "paid", code });
+      expect(json).toMatchObject({ status: "paid", code, pointsUsed: 0 });
     });
 
     it("expired: held po expiresAt", async () => {

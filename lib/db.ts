@@ -1,5 +1,6 @@
 import { MongoClient, type Db } from "mongodb";
 import type {
+  CheckoutAttempt,
   Event,
   LoyaltyAccount,
   LoyaltyOperation,
@@ -57,6 +58,10 @@ export function loyaltyOperationsCollection() {
   return getDb().collection<LoyaltyOperation>("loyaltyOperations");
 }
 
+export function checkoutAttemptsCollection() {
+  return getDb().collection<CheckoutAttempt>("checkoutAttempts");
+}
+
 // Indeksy pilnują invariantów: jedno miejsce = jeden dokument, jeden kod = jeden bilet.
 // createIndex jest idempotentne. Wołają to `pnpm db:setup` i testy.
 export async function ensureIndexes(): Promise<void> {
@@ -74,6 +79,8 @@ export async function ensureIndexes(): Promise<void> {
     { pointsEarnedStatus: 1, paidAt: 1 },
     { partialFilterExpression: { pointsEarnedStatus: "pending" } },
   );
+  // Próby płatności z punktami do dokończenia (zwrot punktów) — po stanie.
+  await checkoutAttemptsCollection().createIndex({ status: 1, updatedAt: 1 });
   // Liczniki limitu sprząta TTL po końcu okna; limit działa i bez tego indeksu.
   await rateLimitsCollection().createIndex(
     { expiresAt: 1 },

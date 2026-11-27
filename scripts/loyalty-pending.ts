@@ -34,6 +34,18 @@ async function main() {
       console.info(`  ${f.id} (${f.points} pkt): ${f.lastError ?? ""}`);
     }
 
+    console.info(
+      `Płatności z punktami bez zapłaty ani zwrotu: ${work.attempts.length}`,
+    );
+    for (const a of work.attempts) {
+      console.info(
+        `  próba ${a.id} (${a.status}, ${a.points} pkt, rezerwacja ${a.reservationId}` +
+          (a.sessionId ? `, sesja ${a.sessionId}` : "") +
+          ")" +
+          (a.lastError ? `\n    ostatni błąd: ${a.lastError}` : ""),
+      );
+    }
+
     if (finish) {
       const report = await finishPendingLoyaltyWork(scope);
       console.info(
