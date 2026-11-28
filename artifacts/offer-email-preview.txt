@@ -1,0 +1,10 @@
+Mamy dla Ciebie miejsce
+
+Spektakl: Wieczór teatralny — lista oczekujących
+Termin: 2026-12-15, 19:00
+Scena: Scena Kameralna
+Miejsce: Rząd A, miejsce 1
+Oferta ważna do: 15 grudnia 2026 18:02:00 CET (Europe/Warsaw)
+
+Zapłać: http://localhost:3000/rezerwacja/6740c0ffee00000000000002
+Możesz użyć punktów. Oferta nie jest biletem. Po upływie czasu nieopłacone miejsce przechodzi dalej.

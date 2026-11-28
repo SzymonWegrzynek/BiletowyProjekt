@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ReservationForm } from "@/components/ReservationForm";
 import { formatEventDate, formatPrice, formatSeat } from "@/lib/format";
 import type { Event } from "@/lib/schemas";
+import { eventSeats } from "@/lib/waitlist";
+import { WaitlistForm } from "@/components/WaitlistForm";
+import type { WaitlistApi } from "@/lib/waitlist-client";
 
-const ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
-const SEATS = Array.from({ length: 10 }, (_, index) => index + 1);
 // Przejście między fotelami 5 i 6, jak w prawdziwej widowni.
 const AISLE_AFTER = 5;
 
@@ -17,6 +18,9 @@ const SEAT_TAKEN_MESSAGE = "Ktoś był szybszy — wybierz inne miejsce";
 type Props = {
   event: Event;
   takenSeats: string[];
+  soldOut?: boolean;
+  waitlistApi?: WaitlistApi;
+  onWaitlistJoined?: (id: string) => void;
 };
 
 function parseTakenSeats(body: unknown): string[] | null {
@@ -30,8 +34,17 @@ function parseTakenSeats(body: unknown): string[] | null {
     : null;
 }
 
-export function SeatMap({ event, takenSeats: initialTakenSeats }: Props) {
+export function SeatMap({
+  event,
+  takenSeats: initialTakenSeats,
+  soldOut: initialSoldOut = false,
+  waitlistApi,
+  onWaitlistJoined,
+}: Props) {
   const eventId = event._id;
+  const seats = eventSeats(event);
+  const rows = [...new Set(seats.map((seat) => seat[0]))];
+  const [soldOut, setSoldOut] = useState(initialSoldOut);
   const [takenSeats, setTakenSeats] = useState(initialTakenSeats);
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -46,12 +59,20 @@ export function SeatMap({ event, takenSeats: initialTakenSeats }: Props) {
         { cache: "no-store" },
       );
       if (!response.ok) return;
-      const seats = parseTakenSeats(await response.json());
-      if (seats) setTakenSeats(seats);
+      const body = await response.json();
+      const seats = parseTakenSeats(body);
+      if (seats) {
+        setTakenSeats(seats);
+        setSoldOut(
+          typeof body.soldOut === "boolean"
+            ? body.soldOut
+            : eventSeats(event).every((seat) => seats.includes(seat)),
+        );
+      }
     } catch {
       // Zostaje ostatni znany stan — spróbujemy przy następnym odświeżeniu.
     }
-  }, [eventId]);
+  }, [eventId, event, setSoldOut]);
 
   useEffect(() => {
     if (reserved) return;
@@ -69,9 +90,9 @@ export function SeatMap({ event, takenSeats: initialTakenSeats }: Props) {
   // Wybrany fotel zajął w międzyczasie ktoś inny (wynik odświeżenia).
   const selectionLost =
     !reserved && selectedSeat !== null && takenSeats.includes(selectedSeat);
-  const activeSeat = selectionLost ? null : selectedSeat;
+  const activeSeat = selectionLost || soldOut ? null : selectedSeat;
   const message = notice ?? (selectionLost ? SEAT_TAKEN_MESSAGE : null);
-  const freeCount = ROWS.length * SEATS.length - takenSeats.length;
+  const freeCount = seats.filter((seat) => !takenSeats.includes(seat)).length;
   const date = formatEventDate(event.date);
 
   function selectSeat(seatId: string) {
@@ -128,27 +149,41 @@ export function SeatMap({ event, takenSeats: initialTakenSeats }: Props) {
         </div>
 
         <div className="mx-auto mt-10 flex max-w-lg flex-col gap-2 sm:gap-2.5">
-          {ROWS.map((row) => (
+          {rows.map((row) => (
             <div key={row} className="flex items-center gap-2 sm:gap-3">
               <span className="w-4 shrink-0 text-center text-xs font-medium text-muted">
                 {row}
               </span>
-              <div className="grid flex-1 grid-cols-[repeat(5,minmax(0,1fr))_0.5rem_repeat(5,minmax(0,1fr))] gap-1.5 sm:grid-cols-[repeat(5,minmax(0,1fr))_1.25rem_repeat(5,minmax(0,1fr))] sm:gap-2">
-                {SEATS.map((seat) => {
-                  const seatId = `${row}${seat}`;
-                  const taken = takenSeats.includes(seatId);
-                  return (
-                    <SeatButton
-                      key={seatId}
-                      number={seat}
-                      label={`${formatSeat(seatId)}${taken ? ", zajęte" : ""}`}
-                      taken={taken}
-                      selected={activeSeat === seatId}
-                      aisleBefore={seat === AISLE_AFTER + 1}
-                      onSelect={() => selectSeat(seatId)}
-                    />
-                  );
-                })}
+              <div
+                className="grid flex-1 gap-1.5 sm:gap-2"
+                style={{
+                  gridTemplateColumns:
+                    seats.filter((seat) => seat[0] === row).length === 10
+                      ? "repeat(5,minmax(0,1fr)) 0.5rem repeat(5,minmax(0,1fr))"
+                      : `repeat(${seats.filter((seat) => seat[0] === row).length}, minmax(0,3rem))`,
+                  justifyContent: "center",
+                }}
+              >
+                {seats
+                  .filter((seat) => seat[0] === row)
+                  .map((seatId) => {
+                    const seat = Number(seatId.slice(1));
+                    const taken = takenSeats.includes(seatId);
+                    return (
+                      <SeatButton
+                        key={seatId}
+                        number={seat}
+                        label={`${formatSeat(seatId)}${taken ? ", zajęte" : ""}`}
+                        taken={taken}
+                        selected={activeSeat === seatId}
+                        aisleBefore={
+                          seats.filter((seat) => seat[0] === row).length ===
+                            10 && seat === AISLE_AFTER + 1
+                        }
+                        onSelect={() => selectSeat(seatId)}
+                      />
+                    );
+                  })}
               </div>
               <span className="w-4 shrink-0 text-center text-xs font-medium text-muted">
                 {row}
@@ -175,7 +210,20 @@ export function SeatMap({ event, takenSeats: initialTakenSeats }: Props) {
           </p>
         )}
 
-        {activeSeat ? (
+        {soldOut ? (
+          <WaitlistForm
+            eventId={eventId}
+            api={waitlistApi}
+            onJoined={onWaitlistJoined}
+            onAvailable={() => {
+              setSoldOut(false);
+              setNotice(
+                "Pojawiły się wolne miejsca — wybierz fotel na planie.",
+              );
+              void refresh();
+            }}
+          />
+        ) : activeSeat ? (
           <ReservationForm
             key={activeSeat}
             eventId={eventId}
