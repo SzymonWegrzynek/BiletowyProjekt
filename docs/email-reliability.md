@@ -87,8 +87,9 @@ tego samego klucza. Do testów nowej treści stosuj nową etykietę operacji.
 `email:inspect` tylko odczytuje stan maila testowego. Faktyczny test dostarczenia
 wymaga Resend; mocki nie są dowodem dostarczenia w usłudze.
 
-Szymon powinien wywoływać zwykłe `sendTicketConfirmation(id)` po zatwierdzeniu
-płatności i punktów. Powtórzone zdarzenie przejdzie przez deduplikację.
+Webhook Stripe na `main` wywołuje zwykłe `sendTicketConfirmation(id)` po zapisie
+biletu i próbie naliczenia nagrody. Powtórzone zdarzenie przechodzi przez
+deduplikację. Nagroda oczekująca na Voucherify pozostaje osobną operacją.
 Nie wolno wywoływać procesu naliczania punktów podczas `retry` maila.
 W tej wersji status doręczenia odczytuje komenda `check`; integracja webhooka
 Resend/pollera może później uruchamiać ten sam odczyt po providerId.
