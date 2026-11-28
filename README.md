@@ -413,6 +413,24 @@ pnpm loyalty:pending --finish --email=jan@example.com
 - Na limicie zapytań skrypt przerywa pracę. Uruchom go ponownie po czasie z komunikatu.
 - Operacje `failed` (odrzucone przez Voucherify) wymagają ręcznego sprawdzenia w panelu Voucherify.
 
+## Kolejka i oferty miejsc (Etap IV — część Olka)
+
+Frontend kolejki i moduły poczty są przygotowane na zaślepkach kontraktu.
+Podgląd lokalny: `/dev/kolejka` (tylko development), podgląd maila:
+`pnpm email:offer:preview`. [Opis integracji i pozostałych zależności](docs/waitlist-frontend-mail.md).
+Pełny przepływ wymaga backendów A/B; handler webhooka Resend czeka na podłączenie
+`markOfferMissed`. Nie wykonano jeszcze rzeczywistej wysyłki oferty.
+
+### Zagrożenia Etapu IV — Resend
+
+| Zagrożenie                                | Zabezpieczenie w C                                                             | Zależność do domknięcia                                   |
+| ----------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| Timeout, 5xx, utrata odpowiedzi           | Timeout 5 s, zapis próby przed wysyłką, trwały klucz i body, ograniczone retry | Wyzwalacze B muszą ponawiać zaległe wiadomości            |
+| Podwójny mail przy równoległych żądaniach | Atomowe przejęcie próby i klucz idempotencji per oferta                        | B tworzy nowy stan `mail` tylko dla nowej oferty          |
+| 429                                       | Cooldown respektuje `Retry-After`; odczyty nie przesuwają terminu              | Wygaszenie oferty niezależne od poczty                    |
+| Stałe 4xx / brak webhooka                 | Brak niekontrolowanych ponowień; `sent` nie oznacza `delivered`                | B wygasza ofertę i przydziela miejsce następnej osobie    |
+| Fałszywy, ponowiony lub spóźniony bounce  | Podpis Svix, kontrola aktualnej oferty i rezerwacji, obsługa duplikatów        | Atomowe i idempotentne `markOfferMissed` w B chroni zakup |
+
 ## Hosting
 
 Lekcja E04: gdy webhook płatności się opóźnia, UI po 30 sekundach informuje o oczekiwaniu, sprawdza status co 10 sekund i pozwala sprawdzić go ręcznie; bilet pokazuje wyłącznie po odpowiedzi API `paid` z kodem, nigdy na podstawie powrotu ze Stripe.

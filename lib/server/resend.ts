@@ -21,7 +21,11 @@ export function allowedRecipient(email: string, live: boolean) {
 export class ResendSendError extends Error {
   readonly retryable: boolean;
   readonly kind: string;
-  constructor(kind: string, retryable: boolean) {
+  constructor(
+    kind: string,
+    retryable: boolean,
+    public readonly retryAfterMs?: number,
+  ) {
     super("Resend nie potwierdził przyjęcia wiadomości");
     this.name = "ResendSendError";
     this.kind = kind;
@@ -29,7 +33,11 @@ export class ResendSendError extends Error {
   }
 }
 
-export async function sendResendRequest(requestBody: string, key: string) {
+export async function sendResendRequest(
+  requestBody: string,
+  key: string,
+  options: { timeoutMs?: number } = {},
+) {
   const config = resendConfig();
   if (!config) throw new Error("Resend nie jest skonfigurowany");
   const email = JSON.parse(requestBody);
@@ -52,7 +60,7 @@ export async function sendResendRequest(requestBody: string, key: string) {
         "Idempotency-Key": key,
       },
       body: requestBody,
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 8000),
     });
   } catch {
     throw new ResendSendError("timeout_or_network", true);
@@ -62,10 +70,19 @@ export async function sendResendRequest(requestBody: string, key: string) {
     throw new ResendSendError(
       `http_${response.status}`,
       response.status >= 500 || response.status === 429,
+      retryAfterMilliseconds(response.headers.get("Retry-After")),
     );
   if (typeof data?.id !== "string" || !data.id.trim())
     throw new ResendSendError("invalid_response", true);
   return data.id as string;
+}
+
+export function retryAfterMilliseconds(value: string | null) {
+  if (!value) return undefined;
+  const milliseconds = /^\d+(\.\d+)?$/.test(value)
+    ? Number(value) * 1000
+    : Date.parse(value) - Date.now();
+  return Number.isFinite(milliseconds) ? Math.max(0, milliseconds) : undefined;
 }
 
 export async function sendWithResend(email: TicketEmail, key: string) {

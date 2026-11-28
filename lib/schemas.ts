@@ -13,6 +13,13 @@ export const eventSchema = z.object({
   stage: z.string(),
   // Kwota w groszach.
   price: z.number().int().nonnegative(),
+  // Etap IV: opcjonalny plan; starsze wydarzenia nadal mają 80 miejsc.
+  seats: z
+    .array(z.string().regex(/^[A-H]([1-9]|10)$/))
+    .min(1)
+    .max(80)
+    .refine((seats) => new Set(seats).size === seats.length)
+    .optional(),
 });
 export type Event = z.infer<typeof eventSchema>;
 

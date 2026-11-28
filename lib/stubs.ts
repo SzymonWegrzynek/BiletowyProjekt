@@ -36,3 +36,32 @@ export const STUB_RESERVATION_STATUS = {
 
 // Etap III — saldo nowego klienta (frontend A/B na zaślepce).
 export const STUB_LOYALTY_POINTS = 1000;
+
+// Etap IV: wyłącznie przykłady kontraktu; endpointy produkcyjne ich nie używają.
+export const STUB_WAITLIST_ID = "6740c0ffee00000000000001";
+export const STUB_WAITLIST_EVENT = {
+  _id: "waitlist-test",
+  title: "Wieczór teatralny — lista oczekujących",
+  date: "2026-12-15",
+  time: "19:00",
+  stage: "Scena Kameralna",
+  price: 4500,
+  seats: ["A1", "A2"],
+};
+export const STUB_WAITLIST_STATUS = {
+  waiting: { status: "waiting", position: 2 },
+  offered: {
+    status: "offered",
+    position: 0,
+    reservationId: "6740c0ffee00000000000002",
+    offerExpiresAt: "2026-12-15T17:15:00.000Z",
+    seatId: "A1",
+  },
+  done: {
+    status: "done",
+    position: 0,
+    reservationId: "6740c0ffee00000000000002",
+  },
+  missed: { status: "missed", position: 0 },
+  left: { status: "left", position: 0 },
+} as const;

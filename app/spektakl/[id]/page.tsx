@@ -4,6 +4,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { SeatMap } from "@/components/SeatMap";
 import { eventsCollection, reservationsCollection } from "@/lib/db";
 import { activeReservationFilter } from "@/lib/reservation";
+import { eventSeats } from "@/lib/waitlist";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -17,7 +18,17 @@ export default async function EventDetailsPage({
 
   const event = await eventsCollection().findOne(
     { _id: id },
-    { projection: { _id: 1, title: 1, date: 1, time: 1, stage: 1, price: 1 } },
+    {
+      projection: {
+        _id: 1,
+        title: 1,
+        date: 1,
+        time: 1,
+        stage: 1,
+        price: 1,
+        seats: 1,
+      },
+    },
   );
 
   if (!event) notFound();
@@ -42,7 +53,12 @@ export default async function EventDetailsPage({
         <h1 className="title mt-3 text-6xl sm:text-7xl">{event.title}</h1>
       </header>
 
-      <SeatMap key={event._id} event={event} takenSeats={takenSeats} />
+      <SeatMap
+        key={event._id}
+        event={event}
+        takenSeats={takenSeats}
+        soldOut={eventSeats(event).every((seat) => takenSeats.includes(seat))}
+      />
     </main>
   );
 }

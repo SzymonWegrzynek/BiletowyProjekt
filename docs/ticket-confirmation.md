@@ -66,10 +66,13 @@ Node crypto i nie mogą być importowane przez komponenty klienckie.
 Obecny endpoint Etapu I `/purchase` wywołuje moduł dopiero po udanym zapisie
 zakupu (również przy ponowieniu już kupionej rezerwacji). Starsze rezerwacje
 bez rozliczenia są pomijane. Nie dopisujemy im sztucznie punktów.
-Webhook Stripe nie istnieje jeszcze w tej gałęzi. Jego integracja musi
-wywołać `await sendTicketConfirmation(id)` **po weryfikacji płatności,
-zatwierdzeniu transakcji i zapisaniu pełnego rozliczenia**. Gdy punkty
-nalicza późniejsze zadanie A, wywołanie należy umieścić po jego zapisie.
+Webhook Stripe `/api/webhooks/stripe` wywołuje
+`await sendTicketConfirmation(id)` po weryfikacji płatności, zapisie biletu
+i próbie naliczenia nagrody przez `awardPurchasePoints`. Powtórzone zdarzenie
+tej samej sesji również przechodzi przez moduł wysyłki, który deduplikuje
+istniejącą operację. Integracja jest na `main` od PR #31.
+Gdy Voucherify nie odpowiada, nagroda może pozostać `pending`; bilet i zapisane
+rozliczenie pozostają dostępne, a błąd poczty nie cofa płatności.
 Powrót klienta ze Stripe ani żądanie GET nie uruchamiają wysyłki.
 
 ## Resend i test
